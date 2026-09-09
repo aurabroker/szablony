@@ -178,6 +178,7 @@ Propozycja: gdy `frameAncestors` to `'none'` → `X-Frame-Options: DENY`, gdy ty
 |------|---------|-----|
 | 2026-09-09 | Analiza kodu Workera zapisana, wdrożenie wstrzymane do instrukcji | — |
 | 2026-09-09 | Ocena pakietu promptów i `CLAUDE.md` (sekcja 8), rekomendacja: PROMPT 0 przed PROMPT 1 | — |
+| 2026-09-09 | Zakres szerszego „Workera bezpieczeństwa" (sekcja 9), rekomendacja: zacząć od warstwy cron | — |
 
 ---
 
@@ -418,6 +419,148 @@ Do listy z sekcji 6 dochodzą trzy pytania:
 8. Czy host pilotażowy serwuje jakiekolwiek zasoby dla innych domen i czy ma
    logowanie przez popup? To decyduje, czy K1 dotyczy nas w praktyce.
 9. Czy `CLAUDE.md` z Account ID trafia do repozytorium publicznego?
+
+
+---
+
+## 9. Czy da się zrobić Workera pilnującego bezpieczeństwa stron i aplikacji?
+
+### 9.1 Krótka odpowiedź
+
+Da się, ale nie jako jeden Worker. „Pilnowanie bezpieczeństwa" to trzy różne
+zadania o różnym profilu ryzyka i tylko pierwsze z nich należy do kodu
+stojącego na ścieżce żądania:
+
+1. **Prewencja w locie** — nagłówki, CSP, flagi ciasteczek, blokada wrażliwych
+   ścieżek. Musi być inline, przy każdym żądaniu.
+2. **Detekcja** — rozpoznawanie, że na stronie pojawiło się coś, czego nie
+   powinno być. Częściowo inline (pasywnie, bez blokowania), częściowo poza
+   ścieżką żądania.
+3. **Dozór okresowy** — cykliczny audyt stanu wszystkich hostów i alert, gdy
+   coś się rozjedzie. Zero powodu, żeby to było na ścieżce żądania.
+
+Kluczowa zasada: **każda funkcja dołożona do Workera inline zwiększa opóźnienie
+i promień rażenia awarii dla wszystkich aplikacji naraz.** Worker nagłówkowy już
+dziś jest pojedynczym punktem awarii dla kilku hostów. Dokładanie do niego
+skanowania, liczników i integracji to prosta droga do sytuacji, w której błąd
+w module antyfraudowym kładzie sklep. Stąd podział na cienki Worker inline
+i gruby Worker cron poza ruchem.
+
+### 9.2 Co należy do Workera, a co do innych warstw
+
+| Zadanie | Gdzie to robić | Uzasadnienie |
+|---|---|---|
+| Nagłówki bezpieczeństwa, CSP, nonce | **Worker inline** | jedno miejsce zamiast konfiguracji w każdym frameworku |
+| Wymuszenie flag ciasteczek (`Secure`, `HttpOnly`, `SameSite`) | **Worker inline** | przepisanie `Set-Cookie` z originu, ratuje starsze aplikacje bez ich zmiany |
+| Blokada wrażliwych ścieżek (`/.env`, `/.git/`, `.bak`, mapy źródeł na produkcji) | **Worker inline** | tanie, jedna lista dla wszystkich hostów |
+| Blokada metod (`TRACE`, `TRACK`) | **Worker inline** | dwie linijki |
+| Raporty CSP jako sygnał włamania | **Worker inline (zapis) + cron (analiza)** | zapis musi być przy żądaniu, analiza nie |
+| Wykrywanie obcych skryptów w HTML | **Worker inline, pasywnie** | `HTMLRewriter` i tak przechodzi po HTML, dokładamy odczyt `src` bez blokowania |
+| Kontrola integralności plików JS (dryf hashy) | **Worker cron** | pobranie i zhashowanie pliku na ścieżce żądania to zbędne opóźnienie |
+| Audyt nagłówków na wszystkich hostach | **Worker cron** | z definicji cykliczny |
+| Wygasanie certyfikatów, dryf DNS | **Worker cron + API Cloudflare** | dane są w API, nie w ruchu |
+| Rate limiting, blokada skanerów, geoblokada | **Reguły WAF w panelu** | działają przed Workerem, nie kosztują CPU i nie da się ich zepsuć deployem |
+| Boty, spam w formularzach | **Turnstile / Bot Management** | osobny produkt, nie do pisania samemu |
+| Podatności w zależnościach | **CI (npm audit, Dependabot)** | to problem builda, nie ruchu |
+| Sekrety w repozytorium | **GitHub secret scanning** | jw. |
+
+Jedno zdanie o tym, czego nie budować: rate limiting i blokowanie skanerów
+w kodzie Workera to klasyczny błąd. Reguły WAF działają wcześniej, są
+zmienialne bez deployu i nie mogą wywalić aplikacji błędem w kodzie.
+
+### 9.3 Proponowana architektura
+
+```
+                    ┌─ Worker inline (cienki, na trasie hostów) ─┐
+przeglądarka → CF → │  nagłówki + CSP + ciasteczka + blokady      │ → origin
+                    │  pasywna obserwacja HTML → Analytics Engine │
+                    └────────────────────────────────────────────┘
+                                        │
+                                        ▼
+                              Analytics Engine / KV
+                                        ▲
+                    ┌─ Worker cron (gruby, poza ruchem) ─────────┐
+                    │  audyt hostów, hashe JS, certyfikaty, DNS  │
+                    │  analiza raportów CSP, wykrywanie dryfu    │
+                    └────────────────────────────────────────────┘
+                                        │
+                                        ▼
+                            webhook → n8n → Slack / mail
+```
+
+Warstwa alertów trafia do n8n, które i tak jest w tej organizacji używane
+(to repozytorium trzyma jego szablony). Worker nie powinien znać Slacka ani
+skrzynki pocztowej — wysyła jeden webhook, resztą zajmuje się workflow. Dzięki
+temu zmiana adresata alertu nie wymaga deployu Workera.
+
+### 9.4 Zakres pierwszej wersji
+
+Sensowny MVP, do zrobienia po utwardzeniu istniejącego kodu (PROMPT 0 z sekcji 8.6):
+
+**Worker inline — dołożyć do obecnego:**
+
+- Normalizacja `Set-Cookie`: dopisanie `Secure`, `HttpOnly` tam, gdzie brak,
+  i `SameSite=Lax` jako domyślnej. Wyjątki per host w KV, bo `HttpOnly` zepsuje
+  ciasteczka czytane z JavaScriptu.
+- Lista ścieżek zwracających 404 zamiast trafiać do originu: `/.env`,
+  `/.git/`, `/.svn/`, `/wp-config.php.bak`, `*.sql`, `*.map` na produkcji.
+  Każde trafienie to wpis do Analytics Engine — sama lista prób jest sygnałem.
+- Odrzucanie `TRACE` i `TRACK`.
+- Pasywna obserwacja HTML w `HTMLRewriter`: zapis hostów wszystkich
+  `<script src>` oraz `action` formularzy wychodzących poza domenę. Bez
+  blokowania. Po tygodniu mamy listę tego, co realnie na stronach jest.
+
+**Worker cron — nowy, uruchamiany co godzinę:**
+
+- Dla każdego hosta: `curl` własnych nagłówków i porównanie z oczekiwaną
+  polityką. Alert, gdy nagłówek zniknął albo ktoś zmienił go w panelu.
+- Hash plików JS z listy krytycznej, porównanie z wartością w KV. Zmiana bez
+  zapowiedzi to sygnał podmiany. To jest tania wersja tego, co robi Page Shield.
+- Dni do wygaśnięcia certyfikatu, stan proxy DNS (pomarańczowa chmurka),
+  obecność `security.txt`.
+- Podsumowanie naruszeń CSP z ostatniej doby: nowe domeny, których wcześniej
+  nie było w raportach. Nowa domena w `blockedURL` to najwcześniejszy sygnał
+  wstrzyknięcia, jaki ta warstwa jest w stanie dać.
+- Jeden webhook do n8n z wynikiem. Cisza, gdy wszystko się zgadza.
+
+**Czego świadomie nie robimy w pierwszej wersji:** blokowania czegokolwiek
+na podstawie detekcji. Najpierw obserwacja, potem reguły. Dokładnie ta sama
+zasada, co przy CSP w trybie `report-only`.
+
+### 9.5 Ograniczenia, o których trzeba wiedzieć zawczasu
+
+- **Promień rażenia.** Worker inline na trasie kilku hostów to jeden punkt
+  awarii dla wszystkich. Każda nowa funkcja musi mieć fail-open i test.
+- **Budżet CPU.** Skanowanie treści inline'owych skryptów w `HTMLRewriter`
+  kosztuje CPU przy każdym żądaniu HTML. Odczyt atrybutów jest tani, analiza
+  treści już nie. Stąd hashowanie w cronie, nie inline.
+- **Detekcja to nie ochrona.** Ten zestaw wykryje podmieniony skrypt i obcą
+  domenę, ale nie zatrzyma ataku, który nie dotyka HTML-a: przejętego konta
+  administratora, podatności w API, wycieku bazy. Tego pilnuje się gdzie indziej.
+- **Fałszywe alarmy niszczą proces.** Alert, który odzywa się codziennie bez
+  powodu, po tygodniu jest ignorowany. Dlatego cisza jako stan domyślny
+  i próg, zanim cokolwiek zawoła.
+- **Koszty.** Workers Paid, Analytics Engine, ewentualnie Durable Objects,
+  jeśli kiedykolwiek dojdzie stan współdzielony. Cron Triggers działają
+  także na planie darmowym.
+- **Zgodność z tym, co już kupione.** Jeśli strefa jest na planie Business
+  lub wyżej, Page Shield robi monitoring skryptów natywnie i lepiej. Wtedy
+  własny cron ma sens tylko dla nagłówków, certyfikatów i raportów CSP.
+  Do sprawdzenia przed pisaniem kodu.
+
+### 9.6 Pytania do decyzji
+
+Do listy z sekcji 6 i 8.9:
+
+10. Jaki plan ma strefa? Business i wyżej zmienia rachunek build vs buy
+    (Page Shield, WAF, rate limiting).
+11. Ile jest hostów i czy istnieje ich aktualna lista? Bez inwentarza dozór
+    okresowy nie ma czego pilnować.
+12. Gdzie mają trafiać alerty i kto na nie reaguje? Bez odpowiedzi na drugą
+    część nie warto budować pierwszej.
+13. Czy zaczynamy od warstwy inline (rozszerzenie obecnego Workera), czy od
+    crona (dozór, zero ryzyka dla ruchu produkcyjnego)? Rekomendacja: od crona,
+    bo nie dotyka ruchu i od razu daje obraz stanu wszystkich hostów.
 
 
 ## Załącznik A — snapshot kodu wejściowego (v0, niewdrożony)
