@@ -1,0 +1,39 @@
+{
+  "maxSubrequests": 45,
+  "requestTimeoutMs": 10000,
+  "digestCron": "0 6 * * *",
+  "alerts": {
+    "minStatus": "warn",
+    "notifyOnRecovery": true
+  },
+  "targets": [
+    "prosty.example.com",
+
+    {
+      "host": "sklep.example.com",
+      "zone": "example.com",
+      "expect": {
+        "csp": "enforce",
+        "hstsMinAge": 31536000,
+        "referrerPolicy": "strict-origin-when-cross-origin",
+        "coop": "same-origin",
+        "cookiesAllowedWithoutHttpOnly": ["cart_ui"]
+      },
+      "assets": [
+        "https://sklep.example.com/static/app.js",
+        "https://sklep.example.com/static/checkout.js"
+      ],
+      "probePaths": ["/.env", "/.git/config", "/config.json"],
+      "cspReportPath": "/__csp-report",
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true
+    },
+
+    {
+      "host": "panel.example.com",
+      "zone": "example.com",
+      "expect": { "csp": "report-only" },
+      "enabled": true
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "security-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker na Cron Triggers: cykliczny audyt nagłówków i konfiguracji bezpieczeństwa hostów",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "dev": "npx wrangler dev",
+    "deploy": "npx wrangler deploy",
+    "check": "npx wrangler deploy --dry-run"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  // Monitor bezpieczeństwa — Worker uruchamiany wyłącznie z harmonogramu.
+  // Nie wpinaj go w routes żadnego hosta produkcyjnego: nie ma tam czego robić,
+  // a każdy Worker na trasie to dodatkowe opóźnienie i dodatkowy punkt awarii.
+  "name": "security-monitor",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-09",
+
+  // Endpoint HTTP służy tylko do podejrzenia raportu i jest chroniony tokenem.
+  // Bez sekretu MONITOR_TOKEN zwraca 503 i nie wydaje żadnych danych.
+  "workers_dev": true,
+
+  "observability": { "enabled": true },
+
+  "triggers": {
+    "crons": [
+      "0 * * * *", // audyt co godzinę, alert tylko przy zmianie stanu
+      "0 6 * * *"  // przegląd dobowy — pełne podsumowanie niezależnie od zmian
+    ]
+  },
+
+  "kv_namespaces": [
+    // npx wrangler kv namespace create MONITOR_STATE
+    { "binding": "MONITOR_STATE", "id": "UZUPELNIJ_ID_NAMESPACE" }
+  ],
+
+  "vars": {
+    // Wartość startowa. Docelowa konfiguracja mieszka w KV pod kluczem
+    // monitor:config i zmienia się bez wdrożenia kodu.
+    "MONITOR_CONFIG": "{\"targets\":[]}",
+    "CSP_DATASET": "csp_reports"
+  }
+}

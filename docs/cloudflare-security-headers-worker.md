@@ -563,6 +563,72 @@ Do listy z sekcji 6 i 8.9:
     bo nie dotyka ruchu i od razu daje obraz stanu wszystkich hostów.
 
 
+---
+
+## 10. Zrealizowane: `workers/security-monitor`
+
+Warstwa dozoru okresowego z sekcji 9 jest zbudowana i leży w
+`workers/security-monitor/`. Nie stoi na ścieżce żądań produkcyjnych, więc jej
+wdrożenie nie może wpłynąć na działanie monitorowanych stron.
+
+Zakres n8n odpadł — organizacja go nie używa. Alerty idą jednym webhookiem
+o treści zgodnej naraz ze Slackiem (`text`) i Discordem (`content`), a bez
+skonfigurowanego webhooka monitor działa cicho: raport i tak leży w KV
+i jest widoczny pod chronionym tokenem adresem HTTP.
+
+### Co sprawdza
+
+Dwanaście sond na host: nagłówki bezpieczeństwa, ochrona przed ramkowaniem,
+`'strict-dynamic'` bez nonce'a, flagi ciasteczek, przekierowanie z portu 80,
+wrażliwe ścieżki (`/.env`, `/.git/config`), metody z nagłówka `Allow`,
+`security.txt`, kanał raportów CSP, dryf hashy plików JS, termin ważności
+certyfikatu i nowe domeny w raportach CSP. Dwie ostatnie wymagają tokenu API
+i bez niego po prostu się pomijają.
+
+Trzy sondy powstały wprost z ustaleń tego dokumentu:
+
+- `frame` wykrywa lukę K2: `frame-ancestors` w trybie report-only przy usuniętym
+  `X-Frame-Options` to brak jakiejkolwiek ochrony przed clickjackingiem.
+- `csp-nonce` wykrywa scenariusz B1 po stronie efektu: polityka z
+  `'strict-dynamic'`, ale bez nonce'a w nagłówku, nie chroni niczego.
+- `csp-pipeline` odpowiada na M7: wysyła syntetyczny raport i sprawdza, czy
+  endpoint zwraca 204. Cisza w datasecie prawie zawsze znaczy zepsuty kanał,
+  a nie czystą aplikację.
+
+### Decyzje projektowe
+
+- **Alarm tylko przy zmianie stanu.** Nowy problem, pogorszenie albo naprawa.
+  Ostrzeżenie trwające tydzień nie odzywa się co godzinę. Raz na dobę idzie
+  pełne podsumowanie niezależnie od zmian.
+- **Budżet podżądań.** Plan darmowy daje 50 na wywołanie. Po wyczerpaniu
+  budżetu pozostałe sondy dostają status `skip` widoczny w raporcie, zamiast
+  cichego ucięcia przebiegu.
+- **Walidacja konfiguracji.** Wpis z KV przechodzi przez `sanitizeConfig`. Zły
+  cel jest pomijany z notatką w raporcie. To wniosek z ustalenia B3, gdzie
+  `{"csp": null}` w KV wywracało hosta.
+- **Endpoint HTTP wymaga tokenu**, porównywanego w czasie stałym, a bez sekretu
+  `MONITOR_TOKEN` zwraca 503 i nie wydaje żadnych danych. Raport wymienia hosty
+  i ich słabe punkty, więc nie może wisieć otwarty.
+- **Podział na moduły** oddziela funkcje czyste od wejścia/wyjścia, dzięki czemu
+  testy nie potrzebują wranglera ani sieci.
+
+### Testy
+
+32 testy uruchamiane przez `npm test`, bez `npm install` — wystarczy wbudowany
+`node --test`. Jednostkowe pokrywają ocenę nagłówków, ciasteczek i walidację
+konfiguracji. Integracyjne podstawiają `fetch` i KV, więc cały przebieg audytu
+jest sprawdzany bez ruchu sieciowego: host zdrowy, host z odsłoniętym `.env`,
+host nieosiągalny, wyczerpany budżet i wykrycie podmiany pliku JS.
+
+`npx wrangler deploy --dry-run` przechodzi.
+
+### Czego brakuje do wdrożenia
+
+Same dane, nie kod: identyfikator namespace'u KV w `wrangler.jsonc`, lista
+hostów w `monitor:config`, sekret `MONITOR_TOKEN` i opcjonalnie `ALERT_WEBHOOK`.
+Instrukcja krok po kroku jest w `workers/security-monitor/README.md`.
+
+
 ## Załącznik A — snapshot kodu wejściowego (v0, niewdrożony)
 
 ```js
