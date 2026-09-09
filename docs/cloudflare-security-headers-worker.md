@@ -3,7 +3,9 @@
 - **Status:** analiza wejściowa, **nic nie wdrożone**, czekam na instrukcje.
 - **Data:** 2026-09-09
 - **Repo:** `aurabroker/szablony`, branch `claude/clever-shannon-30pmsy`
-- **Źródło:** kod wklejony w rozmowie (snapshot w Załączniku A). W repo go nie ma.
+- **Źródło:** kod Workera wklejony w rozmowie (Załącznik A) oraz pliki
+  `promptyclaudecode.md` i `CLAUDE.md` przesłane do oceny (Załącznik B).
+  W repo nie ma żadnego z nich.
 
 Ten plik jest dokumentem roboczym — dopisujemy do niego decyzje i kolejne kroki.
 
@@ -174,9 +176,249 @@ Propozycja: gdy `frameAncestors` to `'none'` → `X-Frame-Options: DENY`, gdy ty
 
 | Data | Decyzja | Kto |
 |------|---------|-----|
-| 2026-09-09 | Analiza zapisana, wdrożenie wstrzymane do instrukcji | — |
+| 2026-09-09 | Analiza kodu Workera zapisana, wdrożenie wstrzymane do instrukcji | — |
+| 2026-09-09 | Ocena pakietu promptów i `CLAUDE.md` (sekcja 8), rekomendacja: PROMPT 0 przed PROMPT 1 | — |
 
 ---
+
+---
+
+## 8. Ocena pakietu promptów i `CLAUDE.md`
+
+Ocenione pliki: `promptyclaudecode.md` (4 prompty wdrożeniowe) oraz `CLAUDE.md`
+(kontekst projektu dla agenta). Snapshot obu w Załączniku B.
+
+### 8.1 Werdykt
+
+Warsztatowo to jest bardzo dobry materiał: podział na etapy rozłożone w czasie,
+człowiek w pętli przed każdą nieodwracalną operacją, zasady sformułowane
+negatywnie („NIE ustawiaj", „NIE dodawaj"), rollback pokazany **przed** ryzykowną
+zmianą, osobna lista rzeczy, których w ogóle nie zleca się agentowi. Tego się
+zwykle w takich pakietach nie znajduje.
+
+Problem jest jeden i systemowy: **cały proces stoi na założeniu, że tryb
+`report-only` jest bezpieczny, a to założenie jest fałszywe dla tego Workera.**
+Do tego dochodzi zakaz naprawiania kodu, który ma znane błędy P0 z sekcji 3.
+W obecnej formie PROMPT 1 wdraża na produkcję kod, którego agent nie może
+poprawić, i robi to w trybie, który mimo nazwy zmienia zachowanie przeglądarki
+od pierwszej sekundy.
+
+Ocena: dobra robota procesowa, do użycia po naprawie czterech rzeczy krytycznych.
+
+### 8.2 Co jest dobre i zostaje bez zmian
+
+- Rozbicie na 4 prompty zamiast jednego wielkiego. Każdy ma jeden cel.
+- „Zasady bezwzględne" w PROMPT 1 i „Zasady, których nie łamiemy" w `CLAUDE.md`.
+- Wymóg pokazania diffa i czekania na potwierdzenie przed `wrangler deploy`.
+- PROMPT 3 punkt 3: komenda rollbacku wypisana **zanim** cokolwiek się przełączy.
+- PROMPT 2: podział naruszeń na SZUM / DO POLITYKI / DO POPRAWKI W KODZIE oraz
+  zakaz dopisywania domen bez potwierdzenia człowieka. To jest sedno tej pracy.
+- PROMPT 2: polecenie oznaczania nierozpoznanych domen jako podejrzanych.
+- Sekcja „Czego nie zlecać agentowi" — logowanie, `preload`, decyzja o domenach.
+- Rozgałęzienie Workers Paid / Free dla Analytics Engine.
+- Świadomość konfliktu frameworkowych nonce'ów z trybem `auto` (Faza 4).
+- `CLAUDE.md`: mapowanie `blob1..blob6`, tabela stanu wdrożenia, znane pułapki.
+
+### 8.3 Błędy krytyczne
+
+**K1. „W trybie obserwacji nic się nie zepsuje" — to nieprawda.**
+
+PROMPT 1 deklaruje: „Na produkcji nic nie może zostać zablokowane". Tryb
+`report-only` dotyczy **wyłącznie CSP**. Pozostałe nagłówki Worker ustawia
+w formie egzekwowanej od pierwszego żądania:
+
+| Nagłówek | Co realnie robi w dniu wdrożenia |
+|---|---|
+| `Cross-Origin-Opener-Policy: same-origin` | zrywa `window.opener`, psuje logowanie OAuth i płatności w popupie |
+| `Cross-Origin-Resource-Policy: same-origin` | blokuje użycie naszych fontów/obrazków/JS na innych domenach |
+| `Permissions-Policy` | wyłącza kamerę, mikrofon, geolokalizację i `payment` (Stripe!) |
+| `Strict-Transport-Security` | 2 lata + `includeSubDomains`, zapisuje się w przeglądarce natychmiast |
+| `X-Content-Type-Options: nosniff` | psuje zasoby serwowane z błędnym `content-type` |
+
+Konsekwencja: PROMPT 1 nie ma ani jednego zadania weryfikującego te nagłówki
+w praktyce. Faza 5 sprawdza tylko, czy nagłówki *są*, a nie czy aplikacja nadal
+działa. Pilotaż na „najmniej krytycznym" hoście tego nie wyłapie, jeśli
+krytyczna jest inna aplikacja korzystająca z jego zasobów.
+
+**K2. Faza obserwacji obniża bezpieczeństwo, zamiast je podnosić.**
+
+Worker bezwarunkowo kasuje `X-Frame-Options` (bo „zastępuje je
+`frame-ancestors`"), ale w `report-only` `frame-ancestors` **nie jest
+egzekwowane**. Przez całe 7–14 dni obserwacji host pilotażowy nie ma ani XFO,
+ani działającego `frame-ancestors` — czyli traci ochronę przed clickjackingiem,
+którą miał wcześniej. Żaden z promptów tego nie zauważa.
+
+**K3. `auto` jako domyślny plus PROMPT 3 to prosta droga do CSP bez wartości.**
+
+`CLAUDE.md` opisuje `auto` jako tryb domyślny („aplikacja niezmieniona"),
+a PROMPT 3 przełącza host na `enforce` bez wymogu zmiany trybu nonce'a. To jest
+dokładnie scenariusz B1 z sekcji 3: nonce doklejany do każdego skryptu, więc
+także do wstrzykniętego. Gorzej: w trybie `auto` raporty **będą czyste**,
+bo wszystko dostaje ważny nonce. PROMPT 3 czyta czyste raporty jako zielone
+światło, choć są one wyłącznie skutkiem tego, że polityka nic nie sprawdza.
+
+Warunek z PROMPT 3 („jeśli cokolwiek poza szumem, zatrzymaj się") w trybie
+`auto` jest więc spełniony zawsze, niezależnie od stanu aplikacji.
+
+**K4. Zakaz zmiany kodu przy kodzie z otwartymi błędami P0.**
+
+PROMPT 1 zasada 5 i `CLAUDE.md` zasada 6 zabraniają agentowi ruszać logiki.
+Sama zasada jest słuszna, ale wchodzi w życie na kodzie, w którym brakuje
+globalnego `try/catch` (B2) i walidacji wpisów KV (B3). Efekt: świadomie
+stawiamy na ścieżce krytycznej kilku aplikacji komponent, o którym wiemy,
+że pojedynczy zły wpis w KV zamienia w błąd 1101, i jednocześnie zakazujemy
+jego naprawy.
+
+Rozwiązanie: **PROMPT 0** przed PROMPT 1 (punkt 8.6). Zasada 5 zaczyna
+obowiązywać po utwardzeniu, nie przed.
+
+**K5. Udokumentowany rollback kasuje politykę hosta.**
+
+Komenda z `CLAUDE.md`:
+
+```bash
+npx wrangler kv key put --binding SECURITY_POLICIES "policy:HOST" \
+  '{"csp":{"mode":"report-only"}}' --remote
+```
+
+`mergePolicy` scala tylko jeden poziom, więc ten zapis **podmienia cały obiekt
+`csp`**. Znikają `connectSrc`, `frameSrc`, `formAction`, `imgSrc` wypracowane
+w PROMPT 2, a `nonce` wraca na domyślne `auto` — również na hoście, który
+działał w trybie `origin` (Next.js). W `report-only` nie jest to natychmiastowa
+awaria, ale traci się konfigurację, zmienia tryb nonce'a pod spodem i zalewa
+dataset raportami z polityki domyślnej. Ten sam kształt komendy w PROMPT 3
+punkt 2 („nadpisujesz tylko tryb") jest z tym sprzeczny — przy płytkim merge'u
+nie da się nadpisać samego trybu.
+
+Poprawnie: przed przełączeniem zrzucić aktualny JSON do pliku i rollbackiem
+przywracać **cały** ten plik. Do tego jedno zdanie o czasie propagacji:
+`cacheTtl` 300 s plus propagacja KV, więc rollback działa do kilku minut, a nie
+natychmiast. Prawdziwe wyjście awaryjne to usunięcie trasy Workera, nie KV.
+
+### 8.4 Błędy w konkretnych komendach i zapytaniach
+
+- **M1.** Zapytanie SQL w `CLAUDE.md` nie filtruje po hoście, mimo że `blob1`
+  to host. Przy dwóch i więcej hostach PROMPT 2 analizuje wymieszane dane.
+  Dodać `WHERE blob1 = 'HOST'`.
+- **M2.** `count() AS ile` zaniża wyniki. Analytics Engine przy większym
+  wolumenie próbkuje; poprawnie `sum(_sample_interval) AS ile`. Inaczej
+  „mało wystąpień" może znaczyć „bardzo dużo wystąpień, mocno spróbkowanych".
+- **M3.** W mapowaniu pól brakuje `index1` (Worker zapisuje tam dyrektywę).
+- **M4.** PROMPT 4 ma odwróconą kolejność: zadanie 1 dopisuje host do `routes`,
+  zadanie 2 tworzy wpis w KV. Między jednym a drugim host jedzie na polityce
+  domyślnej, czyli bez wyjątków dla Stripe'a i z `connect-src 'self'`.
+  Najpierw KV, potem trasa.
+- **M5.** Faza 4 (test lokalny) nie odtworzy sytuacji produkcyjnej: w
+  `wrangler dev` `url.hostname` to `localhost`, więc Worker szuka klucza
+  `policy:localhost`, `fetch(upstream)` idzie do nieistniejącego originu,
+  a HSTS nie wyjdzie, bo protokół to `http:`. Potrzebny `--remote` albo atrapa
+  originu, plus jawna lista nagłówków, których lokalnie **nie** będzie.
+- **M6.** Faza 2 dla planu Free każe podmienić `writeDataPoint` na `console.log`,
+  co łamie zasadę 5 z tego samego promptu. Rozwiązać flagą w konfiguracji
+  (`reporter: 'analytics' | 'log'`), a nie edycją logiki.
+- **M7.** PROMPT 2 nie obsługuje najczęstszego wyniku pierwszego podejścia:
+  **zero raportów**. To prawie zawsze znaczy, że pipeline nie działa
+  (zła trasa, `Reporting-Endpoints` nie dociera, endpoint przykryty przez
+  aplikację), a nie że aplikacja jest czysta. Potrzebny test syntetyczny:
+  celowe naruszenie na stronie testowej i potwierdzenie, że wpis dotarł
+  do datasetu, zanim ktokolwiek zinterpretuje ciszę jako sukces.
+- **M8.** PROMPT 2 prosi o wklejenie tokenu API do rozmowy. Lepiej zmienna
+  środowiskowa, token wąski (`Account Analytics: Read`), do skasowania po etapie.
+- **M9.** `CLAUDE.md` przewiduje wpisanie Account ID i id namespace'u KV do
+  pliku w repo. Jeśli repo jest publiczne, to niepotrzebna ekspozycja — lepiej
+  plik nieśledzony albo odsyłacz do menedżera haseł.
+
+### 8.5 Braki procesowe
+
+- **Brak testów i CI.** Deploy na produkcję po jednym `curl -sI`. Dla kodu na
+  ścieżce krytycznej kilku aplikacji to za mało — patrz etap D w sekcji 4.
+- **Brak alertu na błędy Workera.** Nikt nie pilnuje wskaźnika błędów; o 1101
+  dowiemy się od użytkowników.
+- **Brak inwentaryzacji strefy przed startem.** Rocket Loader, Email
+  Obfuscation, Bot Fight Mode, Response Header Transform Rules i `_headers`
+  z Pages potrafią wywrócić wynik. `CLAUDE.md` wspomina tylko o `_headers`.
+- **HSTS bez schodków.** Prompty pilnują `preload`, ale `max-age` 2 lata
+  z `includeSubDomains` też jest trudno odwracalny. Standard to 300 s → 1 dzień
+  → 7 dni → docelowo, z weryfikacją wszystkich subdomen na każdym stopniu.
+- **Brak kryterium „gotowe" i ram czasowych.** „7–14 dni" bez warunku
+  wyjścia (ile ruchu, ile unikalnych naruszeń, czy pipeline potwierdzony).
+- **Brak roli i osoby dyżurnej.** Kto dostaje alert i kto ma prawo odpalić
+  rollback o 23:00.
+
+### 8.6 Proponowany PROMPT 0 — utwardzenie przed wdrożeniem
+
+Wstawiany przed obecnym PROMPT 1. Zakres pokrywa etapy A–D z sekcji 4:
+
+1. Globalny `try/catch` z fail-open na `fetch(request)` (B2).
+2. `sanitizePolicy()` i walidacja wpisów KV, z testami na zepsute wpisy (B3).
+3. Twarda blokada `enforce` + `nonce: auto`, z degradacją do `report-only` (B1).
+4. Rozdzielenie CORP: `same-origin` dla HTML, `cross-origin` dla zasobów (W1).
+5. `X-Frame-Options` wyliczany z `frame-ancestors` zamiast bezwarunkowego
+   kasowania — usuwa regresję K2 na czas obserwacji.
+6. Warunki przepisywania HTML: tylko status 200, tylko UTF-8 (W5, W6).
+7. Limity i próbkowanie na `/__csp-report` (W2).
+8. Wyłącznik globalny `policy:__global` (W4).
+9. `vitest` + `@cloudflare/vitest-pool-workers` i GitHub Actions.
+
+Dopiero po tym PROMPT 1, a zasada „nie zmieniaj logiki" wchodzi w życie
+od tego momentu.
+
+### 8.7 Poprawki do `CLAUDE.md`
+
+Do dopisania w „Zasady, których nie łamiemy":
+
+> 8. **`enforce` nigdy razem z `nonce: auto`.** W trybie `auto` Worker nadaje
+>    nonce każdemu skryptowi w odpowiedzi, także wstrzykniętemu. `auto` służy
+>    wyłącznie do inwentaryzacji w `report-only`.
+> 9. **`report-only` dotyczy wyłącznie CSP.** COOP, CORP, `Permissions-Policy`,
+>    HSTS i `nosniff` działają w pełni od pierwszego żądania. Każdy nowy host
+>    wymaga sprawdzenia logowania, płatności i uprawnień urządzeń.
+> 10. **Rollback to przywrócenie pełnego JSON-a z kopii**, nie fragmentu.
+>     Merge jest płytki, fragment kasuje resztę polityki.
+> 11. **HSTS wprowadzamy schodkowo.** Docelowy `max-age` dopiero po
+>     potwierdzeniu, że wszystkie subdomeny działają po https.
+
+Do zmiany w tabeli trybów nonce'a: `auto` opisany jako **tryb diagnostyczny**,
+nie domyślny do produkcji; `placeholder` i `origin` jako jedyne dopuszczalne
+przy `enforce`.
+
+Do tabeli „Stan wdrożenia" dołożyć kolumny: `HSTS max-age`, `CORP`, `COOP`,
+`data ostatniego przeglądu raportów`.
+
+Do „Przydatne komendy" dołożyć zrzut polityki przed zmianą:
+
+```bash
+npx wrangler kv key get --binding SECURITY_POLICIES "policy:HOST" --remote \
+  > backup-HOST-$(date +%F).json
+```
+
+### 8.8 Poprawki do promptów
+
+- **PROMPT 1:** dodać Fazę -1 (inwentaryzacja strefy: Rocket Loader, Email
+  Obfuscation, Transform Rules, Pages `_headers`, inne Workery na trasie).
+  W Fazie 5 dopisać weryfikację funkcjonalną, nie tylko obecność nagłówków:
+  logowanie, popup OAuth, płatność, upload, wszystko co używa uprawnień
+  urządzeń. Rozwiązać sprzeczność M6. W Fazie 4 uwzględnić M5.
+- **PROMPT 2:** filtr po hoście i `sum(_sample_interval)` (M1, M2), obsługa
+  wyniku „zero raportów" wraz z testem syntetycznym (M7), token przez zmienną
+  środowiskową (M8).
+- **PROMPT 3:** dodać warunek wstępny „`nonce` tego hosta nie jest `auto`" —
+  bez tego cały etap jest pozorny (K3). Zrzut polityki do pliku przed zmianą
+  i rollback z pliku (K5). Dopisać oczekiwany czas propagacji rollbacku
+  i procedurę awaryjną przez usunięcie trasy.
+- **PROMPT 4:** odwrócić kolejność (najpierw KV, potem `routes`) — M4.
+  Dopisać pytanie o to, czy host serwuje zasoby dla innych domen (CORP).
+
+### 8.9 Do decyzji
+
+Do listy z sekcji 6 dochodzą trzy pytania:
+
+7. Czy przed PROMPT 1 robimy PROMPT 0 (utwardzenie), czy świadomie wdrażamy
+   kod w obecnej postaci i przyjmujemy ryzyko z K4?
+8. Czy host pilotażowy serwuje jakiekolwiek zasoby dla innych domen i czy ma
+   logowanie przez popup? To decyduje, czy K1 dotyczy nas w praktyce.
+9. Czy `CLAUDE.md` z Account ID trafia do repozytorium publicznego?
+
 
 ## Załącznik A — snapshot kodu wejściowego (v0, niewdrożony)
 
@@ -565,3 +807,376 @@ Zapytanie o naruszenia (Analytics Engine SQL API):
 
 */
 ```
+
+---
+
+## Załącznik B — oceniane pliki (snapshot)
+
+### B.1 `promptyclaudecode.md`
+
+````markdown
+# Wdrożenie warstwy nagłówków bezpieczeństwa — prompty dla Claude Code
+
+Cztery prompty do wklejenia w kolejnych momentach wdrożenia. Nie wklejaj ich
+wszystkich naraz — każdy dotyczy innego etapu, rozłożonego w czasie.
+
+**Przed pierwszym uruchomieniem:**
+
+1. Utwórz pusty katalog i wejdź do niego w terminalu.
+2. Wrzuć do niego plik `security-headers-worker.js`.
+3. Wrzuć plik `CLAUDE.md`.
+4. Odpal `claude` i wklej PROMPT 1.
+
+---
+
+## Uzupełnij to przed wklejeniem PROMPTU 1
+
+Podmień wartości w sekcji „Kontekst" pierwszego promptu:
+
+| Zmienna | Co wpisać | Przykład |
+|---|---|---|
+| `DOMENA` | wasza strefa w Cloudflare | `example.com` |
+| `HOST_PILOTAZOWY` | jeden host, najlepiej testowy lub najmniej krytyczny | `test.example.com` |
+| `POZOSTALE_HOSTY` | reszta aplikacji, na razie tylko do wiadomości | `app.example.com, sklep.example.com` |
+| `PLAN` | `Workers Paid` albo `Free` | `Workers Paid` |
+| `STACK` | na czym stoi host pilotażowy | `Next.js 15 (SSR)` |
+
+---
+
+# PROMPT 1 — Setup i wdrożenie w trybie obserwacji
+
+```
+Wdrażamy centralną warstwę nagłówków bezpieczeństwa na Cloudflare Workers.
+Przeczytaj CLAUDE.md w katalogu — jest tam pełny kontekst projektu i zasady.
+
+## Kontekst
+
+DOMENA:            example.com
+HOST_PILOTAZOWY:   test.example.com
+POZOSTALE_HOSTY:   app.example.com, sklep.example.com
+PLAN:              Workers Paid
+STACK:             Next.js 15 (SSR)
+
+## Cel tej sesji
+
+Doprowadzić do stanu, w którym Worker działa na HOST_PILOTAZOWY wyłącznie
+w trybie obserwacyjnym (nagłówek Content-Security-Policy-Report-Only) i zbiera
+raporty o naruszeniach. Na produkcji nic nie może zostać zablokowane.
+
+## Zasady bezwzględne
+
+1. NIE ustawiaj csp.mode na "enforce". W tej sesji zostaje "report-only".
+2. NIE dodawaj żadnego hosta poza HOST_PILOTAZOWY do sekcji routes.
+3. NIE włączaj hsts.preload. Jest praktycznie nieodwracalne.
+4. Przed każdym `wrangler deploy` pokaż mi, co dokładnie się zmieni,
+   i poczekaj na moje potwierdzenie.
+5. Nie modyfikuj logiki w security-headers-worker.js. Jeśli uważasz, że coś
+   trzeba zmienić, powiedz mi to i uzasadnij, zamiast zmieniać samodzielnie.
+6. Nie zgaduj account ID ani zone ID. Odczytaj je narzędziami albo mnie zapytaj.
+
+## Zadania
+
+### Faza 0 — weryfikacja środowiska
+- Sprawdź wersję Node (wymagane 20+) i czy npx działa.
+- Sprawdź, czy jestem zalogowany: `npx wrangler whoami`. Jeśli nie, powiedz mi,
+  żebym uruchomił `npx wrangler login` — nie rób tego za mnie.
+- Potwierdź, że plik security-headers-worker.js istnieje w katalogu.
+  Jeśli go nie ma, zatrzymaj się i powiedz mi o tym.
+- Sprawdź, czy DOMENA jest widoczna na koncie jako strefa.
+
+### Faza 1 — projekt
+- Zainicjuj projekt Workers (JavaScript, bez szablonu frameworkowego).
+- Przenieś security-headers-worker.js do src/index.js. Zawartość bez zmian.
+- Ustaw compatibility_date na dzisiejszą datę.
+
+### Faza 2 — zasoby
+- Utwórz namespace KV o nazwie SECURITY_POLICIES i zapisz zwrócone id.
+- Jeśli PLAN to "Workers Paid": dodaj binding Analytics Engine
+  CSP_REPORTS do datasetu csp_reports.
+- Jeśli PLAN to "Free": Analytics Engine nie jest dostępny. Zamiast tego
+  podmień w kodzie wywołanie env.CSP_REPORTS?.writeDataPoint(...) na
+  console.log(JSON.stringify(...)) z tymi samymi polami i powiedz mi,
+  że raporty będę oglądał przez `npx wrangler tail`.
+
+### Faza 3 — konfiguracja
+Utwórz wrangler.jsonc z:
+- workers_dev ustawionym na false,
+- bindingami z fazy 2,
+- routes zawierającym WYŁĄCZNIE HOST_PILOTAZOWY.
+Pokaż mi gotowy plik przed przejściem dalej.
+
+### Faza 4 — test lokalny
+- Uruchom `npx wrangler dev`.
+- Sprawdź nagłówki odpowiedzi, np. przez curl na localhost.
+- Potwierdź obecność: Content-Security-Policy-Report-Only,
+  Permissions-Policy, Referrer-Policy, X-Content-Type-Options,
+  Reporting-Endpoints.
+- Potwierdź BRAK nagłówka Content-Security-Policy bez sufiksu Report-Only.
+- Jeśli STACK to Next.js, Nuxt albo SvelteKit: sprawdź, czy framework sam nie
+  wstawia własnego nonce'a. Jeśli tak, zaproponuj mi ustawienie
+  csp.nonce na "origin" i wyjaśnij dlaczego.
+
+### Faza 5 — wdrożenie
+- Pokaż mi podsumowanie tego, co zostanie wdrożone.
+- Po moim potwierdzeniu uruchom `npx wrangler deploy`.
+- Zweryfikuj produkcję: curl -sI na HOST_PILOTAZOWY, wypisz same nagłówki
+  bezpieczeństwa.
+- Jeśli nagłówków nie ma, zdiagnozuj: dopasowanie trasy, proxy DNS
+  (pomarańczowa chmurka), kolejność Workerów na tej strefie.
+
+### Faza 6 — domknięcie
+- Zaktualizuj sekcję "Stan wdrożenia" w CLAUDE.md: host, tryb, data.
+- Dopisz do CLAUDE.md id namespace'u KV i account ID.
+- Napisz mi krótkie podsumowanie: co jest wdrożone, co obserwować
+  i kiedy wrócić po PROMPT 2.
+
+Zacznij od Fazy 0 i raportuj mi wynik każdej fazy zanim przejdziesz do następnej.
+```
+
+---
+
+# PROMPT 2 — Analiza raportów (po 7–14 dniach)
+
+```
+Przeczytaj CLAUDE.md. Wracamy do wdrożenia nagłówków bezpieczeństwa,
+etap analizy raportów CSP.
+
+## Cel
+Przejrzeć zebrane naruszenia i przygotować listę decyzji: co dopisać do
+polityki, co poprawić w kodzie aplikacji, co zignorować.
+
+## Zadania
+
+1. Pobierz raporty z ostatnich 14 dni.
+   - Workers Paid: zapytanie SQL do Analytics Engine przez API. Poproś mnie
+     o token API z uprawnieniem Account Analytics: Read, jeśli go nie masz.
+     Grupuj po effectiveDirective i blockedURL, sortuj po liczbie wystąpień.
+   - Free: poproś mnie o wklejenie outputu z `npx wrangler tail`.
+
+2. Podziel wyniki na trzy kubełki i przedstaw jako tabelę:
+
+   SZUM — zablokowane adresy zaczynające się od chrome-extension://,
+   moz-extension://, safari-web-extension:// oraz wszystko, co ewidentnie
+   pochodzi z rozszerzeń przeglądarki. Tego nie ruszamy.
+
+   DO POLITYKI — zewnętrzne usługi, których faktycznie używamy. Przy każdej
+   podaj, do której dyrektywy trafia i dlaczego. Zapytaj mnie o potwierdzenie,
+   czy dana usługa jest nasza — nie zakładaj tego sam.
+
+   DO POPRAWKI W KODZIE — głównie script-src-attr, czyli inline'owe handlery
+   typu onclick="". Wypisz konkretne pliki i linie, jeśli da się je ustalić
+   z pola sourceFile. Zaproponuj, jak je przepisać.
+
+3. Dla kubełka DO POLITYKI przygotuj gotową komendę
+   `npx wrangler kv key put` z docelowym JSON-em, ale JEJ NIE URUCHAMIAJ.
+   Pokaż mi ją do zatwierdzenia.
+
+4. Powiedz wprost, czy twoim zdaniem jesteśmy gotowi na tryb ostry,
+   czy potrzeba jeszcze jednej rundy obserwacji. Uzasadnij.
+
+## Zasady
+- Nie przełączaj niczego na "enforce" w tej sesji.
+- Nie dopisuj domen do polityki bez mojego potwierdzenia, że są nasze.
+  Domena w raporcie nie oznacza, że ma tam być.
+- Jeśli w raportach widać domenę, której nie rozpoznajesz, oznacz ją jako
+  podejrzaną i wypisz osobno. Może to być realne wstrzyknięcie.
+```
+
+---
+
+# PROMPT 3 — Włączenie trybu ostrego
+
+```
+Przeczytaj CLAUDE.md. Przełączamy HOST_PILOTAZOWY z trybu obserwacji
+na tryb egzekwowania.
+
+## Zadania
+
+1. Pokaż mi aktualną politykę tego hosta z KV oraz raporty z ostatnich
+   3 dni. Chcę zobaczyć, że jest czysto, zanim cokolwiek zmienimy.
+
+2. Przygotuj komendę przełączającą csp.mode na "enforce" dla tego hosta.
+   Zachowaj wszystkie pozostałe pola polityki bez zmian — nadpisujesz
+   tylko tryb.
+
+3. Zanim ją uruchomisz, wypisz mi w jednej linijce komendę ROLLBACKU,
+   czyli powrotu do "report-only". Chcę ją mieć przed oczami.
+
+4. Po moim potwierdzeniu wykonaj przełączenie.
+
+5. Zweryfikuj: curl -sI powinien teraz zwracać Content-Security-Policy
+   bez sufiksu Report-Only. Potwierdź też, że strona nadal się ładuje.
+
+6. Zaktualizuj CLAUDE.md: tryb i data przełączenia.
+
+## Zasady
+- Jeżeli w raportach z ostatnich 3 dni jest cokolwiek poza szumem
+  z rozszerzeń, zatrzymaj się i powiedz mi o tym zamiast przełączać.
+- Nie dotykaj przy okazji żadnych innych hostów.
+```
+
+---
+
+# PROMPT 4 — Dołożenie kolejnej aplikacji
+
+```
+Przeczytaj CLAUDE.md. Dokładamy kolejny host do warstwy nagłówków.
+
+HOST: sklep.example.com
+STACK: Laravel 11, front w Blade + trochę Vue
+ZEWNĘTRZNE USŁUGI, których jestem świadomy: Stripe, Google Analytics
+
+## Zadania
+
+1. Dopisz HOST do routes w wrangler.jsonc. Nie ruszaj istniejących wpisów.
+2. Utwórz dla niego wpis w KV z trybem "report-only" i wstępną listą
+   wyjątków dla usług, które wymieniłem powyżej. Pokaż mi JSON
+   przed zapisem.
+3. Pokaż mi diff konfiguracji, poczekaj na potwierdzenie, wdróż.
+4. Zweryfikuj nagłówki curlem.
+5. Dopisz host do tabeli stanu w CLAUDE.md z trybem report-only
+   i dzisiejszą datą.
+
+## Zasady
+- Nowy host ZAWSZE zaczyna od "report-only", nawet jeśli wygląda prosto.
+- Nie kopiuj polityki z innego hosta w całości. Każda aplikacja ma
+  inne zależności.
+- Nie zmieniaj konfiguracji hostów już wdrożonych.
+```
+
+---
+
+## Czego nie zlecać agentowi
+
+Trzy rzeczy zrób sam, ręcznie:
+
+- **Logowanie do Cloudflare.** `wrangler login` otwiera przeglądarkę i przyznaje
+  dostęp do całego konta. To twoja decyzja, nie agenta.
+- **Włączenie `hsts.preload`.** Trafienie na globalną listę preload jest
+  praktycznie nieodwracalne i wymaga świadomego audytu wszystkich subdomen.
+- **Decyzja, czy zewnętrzna domena z raportu jest wasza.** Agent nie ma jak
+  tego wiedzieć, a wpisanie obcej domeny do polityki wywraca sens całej pracy.
+````
+
+### B.2 `CLAUDE.md`
+
+````markdown
+# Centralna warstwa nagłówków bezpieczeństwa
+
+Ten projekt to jeden Cloudflare Worker wpięty przed wszystkie nasze aplikacje
+webowe. Dokłada do każdej odpowiedzi nagłówki bezpieczeństwa, w szczególności
+Content Security Policy z nonce'em generowanym per request.
+
+Powód istnienia: zamiast konfigurować te nagłówki osobno w każdej aplikacji
+i w każdym frameworku, mamy jedno miejsce i jedną politykę.
+
+## Architektura
+
+```
+przeglądarka → Cloudflare → [ten Worker] → origin aplikacji
+```
+
+- `src/index.js` — cała logika. Polityka domyślna zaszyta w kodzie.
+- KV namespace `SECURITY_POLICIES` — nadpisania per host, klucz `policy:<hostname>`.
+  Zmiana polityki NIE wymaga wdrożenia kodu.
+- Analytics Engine dataset `csp_reports` — naruszenia zgłaszane przez przeglądarki.
+- Endpoint `/__csp-report` — obsługiwany przez Workera, przyjmuje raporty.
+
+### Tryby nonce'a (pole `csp.nonce`)
+
+| Tryb | Kiedy | Uwagi |
+|---|---|---|
+| `auto` | domyślny, aplikacja niezmieniona | Worker dokleja nonce do każdego `<script>` |
+| `placeholder` | docelowy, wymaga zmiany w originie | origin renderuje `nonce="__CSP_NONCE__"`, HTML pozostaje cache'owalny |
+| `origin` | Next.js, Nuxt, SvelteKit | Worker przekazuje nonce nagłówkiem `x-csp-nonce`, framework używa go sam |
+| `off` | CSP bez nonce'a | ostateczność |
+
+## Zasady, których nie łamiemy
+
+1. **Każdy nowy host zaczyna od `report-only`.** Bez wyjątków, nawet dla
+   prostych aplikacji. Tryb `enforce` dopiero po przejrzeniu raportów.
+2. **Przełączenie na `enforce` wymaga wyraźnej zgody człowieka**, po pokazaniu
+   raportów z ostatnich dni.
+3. **`hsts.preload` zostaje na `false`.** Włączenie wymaga osobnej decyzji
+   i audytu wszystkich subdomen, bo jest praktycznie nieodwracalne.
+4. **Nie dopisujemy domen do polityki na podstawie samego raportu.**
+   Obecność domeny w raporcie nie znaczy, że ma tam być — może to być
+   właśnie to, przed czym się bronimy. Zawsze potwierdzenie od człowieka.
+5. **`nonceOnStyles` zostaje na `false`**, dopóki ktoś świadomie nie zdecyduje
+   inaczej. Włączenie łamie każdy atrybut `style=""` w aplikacji.
+6. **Logika w `src/index.js` nie jest zmieniana bez rozmowy.** Jeśli coś wymaga
+   poprawki, najpierw uzasadnienie, potem zmiana.
+7. **Przed każdym `wrangler deploy` pokazujemy, co się zmieni**, i czekamy
+   na potwierdzenie.
+
+## Stan wdrożenia
+
+Aktualizuj tę tabelę po każdej zmianie.
+
+| Host | Tryb | Nonce | Od kiedy | Uwagi |
+|---|---|---|---|---|
+| _(uzupełnić)_ | | | | |
+
+## Dane konta
+
+```
+Account ID:        (uzupełnić)
+Zone:              (uzupełnić)
+KV namespace id:   (uzupełnić)
+Plan:              (Workers Paid / Free)
+```
+
+## Przydatne komendy
+
+```bash
+# Nagłówki na produkcji
+curl -sI https://HOST | grep -i -E "content-security|strict-transport|permissions|referrer|x-content"
+
+# Aktualna polityka hosta
+npx wrangler kv key get --binding SECURITY_POLICIES "policy:HOST" --remote
+
+# Zmiana polityki (bez wdrożenia kodu)
+npx wrangler kv key put --binding SECURITY_POLICIES "policy:HOST" 'JSON' --remote
+
+# ROLLBACK — powrót do trybu obserwacji
+npx wrangler kv key put --binding SECURITY_POLICIES "policy:HOST" \
+  '{"csp":{"mode":"report-only"}}' --remote
+
+# Logi na żywo
+npx wrangler tail
+
+# Wdrożenie
+npx wrangler deploy
+```
+
+## Zapytanie o raporty
+
+```sql
+SELECT blob4 AS dyrektywa, blob3 AS zablokowane, blob2 AS strona, count() AS ile
+FROM csp_reports
+WHERE timestamp > now() - INTERVAL '14' DAY
+GROUP BY dyrektywa, zablokowane, strona
+ORDER BY ile DESC
+LIMIT 100
+```
+
+Endpoint: `https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/analytics_engine/sql`,
+token z uprawnieniem *Account Analytics: Read*.
+
+Mapowanie pól: `blob1` host, `blob2` documentURL, `blob3` blockedURL,
+`blob4` effectiveDirective, `blob5` sourceFile, `blob6` disposition,
+`double1` lineNumber.
+
+## Znane pułapki
+
+- Naruszenia z adresów `chrome-extension://`, `moz-extension://` i podobnych
+  to rozszerzenia w przeglądarkach użytkowników. Szum, ignorujemy.
+- Aplikacje na Cloudflare Pages mają własny plik `_headers`, który koliduje
+  z tym Workerem. Trzeba wybrać jeden mechanizm.
+- `fetch(request)` do tego samego hosta nie zapętla się — Cloudflare nie
+  uruchamia tego samego Workera po raz drugi w łańcuchu subrequestów.
+- HTMLRewriter zmienia długość body, dlatego Worker usuwa `Content-Length`
+  przy przepisywaniu. To celowe.
+- Framework z własnym mechanizmem nonce'ów plus tryb `auto` daje dwie różne
+  wartości i wszystko przestaje się ładować. Dla takich stacków tryb `origin`.
+````
