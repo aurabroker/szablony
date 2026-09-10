@@ -642,12 +642,16 @@ Monitor jest wdrożony na koncie `Aurabroker@gmail.com's Account`.
 | Cele | 18 domen apex ze wszystkich stref na koncie |
 | Hostów na turę | 4, czyli pełny obieg co 5 godzin |
 | Podżądań na turę | około 28 z 45 dostępnych |
-| Sekrety ustawione | `MONITOR_TOKEN` |
-| Sekrety nieustawione | `ALERT_WEBHOOK`, `CF_API_TOKEN`, `CF_ACCOUNT_ID` |
+| Sekrety ustawione | `MONITOR_TOKEN`, `CF_API_TOKEN`, `RESEND_API_KEY`, `ALERT_FROM`, `ALERT_TO` |
+| Kanał alertów | poczta przez Resend |
 
-Bez `ALERT_WEBHOOK` monitor działa w trybie cichym: wyniki lądują w KV i są
-widoczne pod adresem Workera po podaniu tokenu. Bez `CF_API_TOKEN` sondy
-certyfikatu i raportów CSP zgłaszają status `skip`.
+Alerty idą pocztą przez Resend. Webhook pozostaje dostępny jako drugi kanał,
+wysyłany równolegle, gdyby doszedł Slack albo Discord.
+
+**Zasada dla zmiennych w panelu:** klucze zawsze jako typ **Secret**, nigdy
+**Text**. Wartości tekstowe są widoczne w panelu i znikają przy każdym
+`wrangler deploy`, bo deploy odtwarza bindingi z pliku konfiguracyjnego.
+Sekrety przeżywają wdrożenie.
 
 Dwie zmiany wymuszone realiami tego konta:
 
