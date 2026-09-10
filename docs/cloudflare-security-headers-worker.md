@@ -672,6 +672,42 @@ przebiegu nie dało się odpalić stąd ani przez adres Workera, ani przez
 `wrangler dev --remote`. Pierwszy audyt wykona harmonogram.
 
 
+### Cron Triggers nie działają na tym koncie (2026-09-10)
+
+Harmonogram Cloudflare nie wykonał ani jednego przebiegu przez cztery
+godziny od wdrożenia, mimo poprawnej rejestracji. Test z wpisem `*/5 * * * *`
+oznaczał około 48 spodziewanych uruchomień. Wykonało się zero.
+
+Wykluczone po kolei:
+
+| Hipoteza | Wynik sprawdzenia |
+|---|---|
+| Limit planu darmowego | 3639 żądań na dobę przy limicie 100 000 |
+| Stan wdrożenia | aktywne, 100% ruchu na najnowszej wersji |
+| Rejestracja harmonogramów | trzy wpisy potwierdzone przez API, także po przerejestrowaniu z pominięciem wranglera |
+| Subdomena workers.dev | włączona |
+| Błędy wykonania | zero, żadnego wywołania z harmonogramu w statystykach |
+| Handler `scheduled` | obecny w kodzie, testy jednostkowe przechodzą |
+
+Warstwa HTTP Workera działa: o 12:43 UTC obsłużył dziesięć żądań ze statusem
+powodzenia. Nic nie trafiło wtedy do KV, więc było to odczytanie raportu,
+a nie wywołanie `POST /run`.
+
+Żaden inny Worker na koncie nie ma skonfigurowanego crona, więc nie ma
+punktu odniesienia potwierdzającego, że mechanizm działa tu w ogóle.
+Odczyt subskrypcji konta jest niedostępny dla tokenu tej sesji, więc nie
+dało się potwierdzić, na jakim planie działają Workers.
+
+**Rozwiązanie przyjęte:** wyzwalanie z zewnątrz przez GitHub Actions
+(`.github/workflows/security-monitor.yml`), uderzające w `POST /run`.
+Harmonogram Cloudflare zostaje zarejestrowany na wypadek, gdyby ruszył.
+Podwójne uruchomienie niczego nie psuje, bo przebieg jest idempotentny,
+a alert leci wyłącznie przy zmianie stanu.
+
+**Do zgłoszenia wsparciu Cloudflare**, bo konfiguracja po naszej stronie
+jest poprawna.
+
+
 ## Załącznik A — snapshot kodu wejściowego (v0, niewdrożony)
 
 ```js

@@ -16,7 +16,6 @@
 
   "triggers": {
     "crons": [
-      "*/5 * * * *", // DIAGNOSTYKA: sprawdzenie, czy harmonogram w ogole odpala
       "0 * * * *", // audyt co godzinę, alert tylko przy zmianie stanu
       "0 6 * * *"  // przegląd dobowy — pełne podsumowanie niezależnie od zmian
     ]
