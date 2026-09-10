@@ -5,8 +5,11 @@
 
 import {
   evaluateCookies,
+  evaluateScriptInventory,
   evaluateSecurityHeaders,
   evaluateSecurityTxt,
+  extractScripts,
+  scriptHosts,
 } from './checks.js';
 
 const UA = 'aura-security-monitor/1.0 (+wewnetrzny audyt naglowkow)';
@@ -62,7 +65,7 @@ const skip = (id, title) => [{ id, status: 'skip', title, detail: null }];
 
 /* ------------------------------------------------------------------ */
 
-export async function probeHeaders(target, budget, timeoutMs) {
+export async function probeHeaders(target, budget, timeoutMs, kv) {
   if (!budget.take()) return skip('headers', 'Pominięte: wyczerpany budżet podżądań');
 
   // redirect: 'follow' celowo — chcemy nagłówki strony, którą realnie widzi użytkownik
@@ -82,6 +85,51 @@ export async function probeHeaders(target, budget, timeoutMs) {
     ...evaluateSecurityHeaders(headersToObject(response.headers), target.expect),
     ...evaluateCookies(readSetCookie(response.headers), target.expect),
   ];
+
+  // Inwentarz skryptów z tej samej odpowiedzi — bez dodatkowego podżądania.
+  const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
+  if (target.checkScripts && response.status === 200 && contentType.includes('text/html')) {
+    findings.push(...(await inventoryScripts(target, response, kv)));
+  }
+
+  return findings;
+}
+
+/**
+ * Porównanie listy skryptów ze wzorcem.
+ *
+ * Wzorca NIE nadpisujemy, gdy pojawiła się nowa obca domena. Inaczej
+ * ostrzeżenie zniknęłoby po jednym przebiegu, a chcemy, żeby wisiało do
+ * czasu, aż człowiek je obejrzy i zaakceptuje przez POST /accept.
+ */
+async function inventoryScripts(target, response, kv) {
+  let html = '';
+  try {
+    html = await response.text();
+  } catch (error) {
+    return [{ id: 'scripts', status: 'info', title: 'Nie udało się odczytać treści strony', detail: { blad: String(error?.message ?? error) } }];
+  }
+
+  const current = extractScripts(html, target.host);
+  const key = `baseline:scripts:${target.host}`;
+
+  let baseline = null;
+  try {
+    baseline = kv ? await kv.get(key, { type: 'json' }) : null;
+  } catch {
+    baseline = null;
+  }
+
+  const findings = evaluateScriptInventory(current, baseline, target.host);
+  const nowaDomena = findings.some((f) => f.id === 'scripts' && f.status === 'warn');
+
+  if (kv && !nowaDomena) {
+    await kv.put(
+      key,
+      JSON.stringify({ ...current, domeny: scriptHosts(current.external), seenAt: new Date().toISOString() }),
+    );
+  }
+
   return findings;
 }
 

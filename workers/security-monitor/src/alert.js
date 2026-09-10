@@ -47,7 +47,7 @@ export function shouldAlert(diff, config) {
   return istotne || naprawy;
 }
 
-export async function sendAlert(env, text, report) {
+async function sendWebhook(env, text, report) {
   if (!env.ALERT_WEBHOOK) return { sent: false, reason: 'brak ALERT_WEBHOOK' };
   try {
     const response = await fetch(env.ALERT_WEBHOOK, {
@@ -61,7 +61,7 @@ export async function sendAlert(env, text, report) {
         report: {
           generatedAt: report.generatedAt,
           summary: report.summary,
-          targets: report.targets.map((t) => ({ host: t.host, worst: t.summary.worst, counts: t.summary.counts })),
+          targets: (report.targets ?? []).map((t) => ({ host: t.host, worst: t.summary?.worst, counts: t.summary?.counts })),
         },
       }),
     });
@@ -69,4 +69,52 @@ export async function sendAlert(env, text, report) {
   } catch (error) {
     return { sent: false, reason: String(error?.message ?? error) };
   }
+}
+
+export function buildSubject(report, { digest = false } = {}) {
+  const stan = String(report.summary?.worst ?? 'nieznany').toUpperCase();
+  const hosty = report.summary?.hosts ?? 0;
+  return digest
+    ? `[Monitor] Przegląd dobowy: ${stan}, ${hosty} hostów`
+    : `[Monitor] Zmiana stanu: ${stan}, ${hosty} hostów`;
+}
+
+/** Poczta przez Resend. Klucz i adresy jako sekrety, nic nie jest zaszyte w kodzie. */
+async function sendEmail(env, text, report, options) {
+  if (!env.RESEND_API_KEY) return { sent: false, reason: 'brak RESEND_API_KEY' };
+  if (!env.ALERT_FROM || !env.ALERT_TO) return { sent: false, reason: 'brak ALERT_FROM lub ALERT_TO' };
+
+  const odbiorcy = String(env.ALERT_TO).split(',').map((a) => a.trim()).filter(Boolean);
+
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        authorization: `Bearer ${env.RESEND_API_KEY}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: env.ALERT_FROM,
+        to: odbiorcy,
+        subject: buildSubject(report, options),
+        text: `${text}\n\n${env.REPORT_URL ? `Pełny raport: ${env.REPORT_URL}` : ''}`.trim(),
+      }),
+    });
+
+    if (response.ok) return { sent: true, status: response.status };
+    const detail = await response.text();
+    return { sent: false, status: response.status, reason: detail.slice(0, 300) };
+  } catch (error) {
+    return { sent: false, reason: String(error?.message ?? error) };
+  }
+}
+
+/** Wysyła wszystkimi skonfigurowanymi kanałami naraz. */
+export async function sendAlert(env, text, report, options = {}) {
+  const [webhook, email] = await Promise.all([
+    sendWebhook(env, text, report),
+    sendEmail(env, text, report, options),
+  ]);
+  return { sent: webhook.sent || email.sent, webhook, email };
 }

@@ -82,6 +82,7 @@ export function normalizeTarget(raw) {
     // Sonda kanału raportów ma sens tylko tam, gdzie stoi Worker nagłówkowy.
     // Domyślnie wyłączona, żeby nie produkować 404 jako fałszywych błędów.
     checkCspPipeline: source.checkCspPipeline === true,
+    checkScripts: source.checkScripts !== false,
     checkHttpRedirect: source.checkHttpRedirect !== false,
     checkSecurityTxt: source.checkSecurityTxt !== false,
     enabled: source.enabled !== false,

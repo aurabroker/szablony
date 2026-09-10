@@ -340,3 +340,125 @@ export function diffStates(prev = {}, next = {}) {
 
   return { nowe, pogorszone, naprawione };
 }
+
+/* ------------------------------------------------------------------ */
+/* Inwentarz skryptów na stronie                                       */
+/* ------------------------------------------------------------------ */
+
+const SCRIPT_TAG = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi;
+const SCRIPT_SRC_ONLY = /<script\b([^>]*?)\/?>/gi;
+const SRC_ATTR = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i;
+
+/** Adres bez parametrów i kotwicy — wersje typu ?ver=6.4 nie mają robić szumu. */
+export function normalizeScriptUrl(raw, host) {
+  try {
+    const url = new URL(String(raw).trim(), `https://${host}/`);
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    url.search = '';
+    url.hash = '';
+    return { url: url.toString(), host: url.hostname.toLowerCase() };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Wyciąga z HTML listę skryptów. Świadomie na wyrażeniach regularnych, a nie
+ * na HTMLRewriterze: dzięki temu funkcja jest czysta i testowalna w node.
+ */
+export function extractScripts(html, host, limitBytes = 512 * 1024) {
+  const source = String(html ?? '').slice(0, limitBytes);
+  const external = new Set();
+  let inlineCount = 0;
+  let inlineBytes = 0;
+
+  SCRIPT_TAG.lastIndex = 0;
+  let match;
+  while ((match = SCRIPT_TAG.exec(source)) !== null) {
+    const attrs = match[1] ?? '';
+    const body = match[2] ?? '';
+    const src = SRC_ATTR.exec(attrs);
+    if (src) {
+      const normalized = normalizeScriptUrl(src[1] ?? src[2] ?? src[3], host);
+      if (normalized) external.add(normalized.url);
+    } else if (body.trim().length) {
+      inlineCount += 1;
+      inlineBytes += body.length;
+    }
+  }
+
+  // Znaczniki samozamykające się i takie bez pary, których pętla wyżej nie złapie.
+  SCRIPT_SRC_ONLY.lastIndex = 0;
+  while ((match = SCRIPT_SRC_ONLY.exec(source)) !== null) {
+    const src = SRC_ATTR.exec(match[1] ?? '');
+    if (!src) continue;
+    const normalized = normalizeScriptUrl(src[1] ?? src[2] ?? src[3], host);
+    if (normalized) external.add(normalized.url);
+  }
+
+  return { external: [...external].sort(), inlineCount, inlineBytes };
+}
+
+export const scriptHosts = (urls) =>
+  [...new Set(urls.map((u) => { try { return new URL(u).hostname.toLowerCase(); } catch { return null; } }).filter(Boolean))].sort();
+
+/**
+ * Porównanie inwentarza z zapisanym wzorcem. Nowa obca domena serwująca skrypt
+ * to najmocniejszy sygnał, jaki ta warstwa potrafi dać — tak wygląda podmiana
+ * kodu na stronie zbierającej dane z formularzy.
+ */
+export function evaluateScriptInventory(current, baseline, host) {
+  if (!baseline || !Array.isArray(baseline.external)) {
+    return [
+      {
+        id: 'scripts',
+        status: 'info',
+        title: `Zapisano wzorzec: ${current.external.length} skryptów zewnętrznych, ${current.inlineCount} wplecionych`,
+        detail: { domeny: scriptHosts(current.external) },
+      },
+    ];
+  }
+
+  const before = new Set(baseline.external);
+  const added = current.external.filter((u) => !before.has(u));
+  const removed = baseline.external.filter((u) => !current.external.includes(u));
+
+  const knownHosts = new Set(scriptHosts(baseline.external));
+  const newHosts = scriptHosts(added).filter((h) => !knownHosts.has(h) && h !== host);
+
+  const out = [];
+
+  if (newHosts.length) {
+    out.push({
+      id: 'scripts',
+      status: 'warn',
+      title: `Nowa domena serwuje skrypt na tej stronie: ${newHosts.join(', ')}`,
+      detail: { nowe: added.slice(0, 15), usuniete: removed.slice(0, 15) },
+    });
+  } else if (added.length || removed.length) {
+    out.push({
+      id: 'scripts',
+      status: 'info',
+      title: `Zmiana listy skryptów: ${added.length} nowych, ${removed.length} usuniętych`,
+      detail: { nowe: added.slice(0, 15), usuniete: removed.slice(0, 15) },
+    });
+  } else {
+    out.push({
+      id: 'scripts',
+      status: 'ok',
+      title: `Bez zmian: ${current.external.length} skryptów zewnętrznych`,
+      detail: null,
+    });
+  }
+
+  if (current.inlineCount !== baseline.inlineCount) {
+    out.push({
+      id: 'scripts-inline',
+      status: 'info',
+      title: `Zmiana liczby skryptów wplecionych w HTML: ${baseline.inlineCount} → ${current.inlineCount}`,
+      detail: null,
+    });
+  }
+
+  return out;
+}

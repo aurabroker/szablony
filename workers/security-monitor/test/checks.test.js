@@ -154,3 +154,64 @@ test('toState spłaszcza wynik przebiegu', () => {
   const state = toState([{ host: 'a.pl', findings: [{ id: 'csp', status: 'ok' }] }]);
   assert.deepEqual(state, { 'a.pl|csp': 'ok' });
 });
+
+test('extractScripts zbiera skrypty zewnętrzne i liczy wplecione', async () => {
+  const { extractScripts } = await import('../src/checks.js');
+  const html = `<html><head>
+    <script src="/js/app.js?ver=6.4"></script>
+    <script src='https://cdn.example.com/lib.js'></script>
+    <script src=https://bez.cudzyslowow.pl/x.js></script>
+    <script>var a=1;</script>
+    <script type="application/json">{"a":1}</script>
+  </head></html>`;
+  const inv = extractScripts(html, 'app.example.com');
+
+  assert.deepEqual(inv.external, [
+    'https://app.example.com/js/app.js',
+    'https://bez.cudzyslowow.pl/x.js',
+    'https://cdn.example.com/lib.js',
+  ]);
+  assert.equal(inv.inlineCount, 2);
+});
+
+test('parametr wersji nie robi szumu przy porównaniu', async () => {
+  const { extractScripts } = await import('../src/checks.js');
+  const a = extractScripts('<script src="/app.js?ver=1"></script>', 'a.pl');
+  const b = extractScripts('<script src="/app.js?ver=2"></script>', 'a.pl');
+  assert.deepEqual(a.external, b.external);
+});
+
+test('nowa obca domena serwująca skrypt to ostrzeżenie', async () => {
+  const { evaluateScriptInventory } = await import('../src/checks.js');
+  const baseline = { external: ['https://a.pl/app.js'], inlineCount: 1 };
+  const current = { external: ['https://a.pl/app.js', 'https://zla.example/skimmer.js'], inlineCount: 1 };
+
+  const findings = evaluateScriptInventory(current, baseline, 'a.pl');
+  const scripts = findings.find((f) => f.id === 'scripts');
+  assert.equal(scripts.status, 'warn');
+  assert.match(scripts.title, /zla\.example/);
+});
+
+test('nowy plik na znanej domenie to tylko informacja', async () => {
+  const { evaluateScriptInventory } = await import('../src/checks.js');
+  const baseline = { external: ['https://a.pl/app.js'], inlineCount: 1 };
+  const current = { external: ['https://a.pl/app.js', 'https://a.pl/nowy.js'], inlineCount: 1 };
+  assert.equal(evaluateScriptInventory(current, baseline, 'a.pl').find((f) => f.id === 'scripts').status, 'info');
+});
+
+test('brak wzorca zapisuje stan wyjściowy zamiast alarmować', async () => {
+  const { evaluateScriptInventory } = await import('../src/checks.js');
+  const findings = evaluateScriptInventory({ external: ['https://a.pl/x.js'], inlineCount: 0 }, null, 'a.pl');
+  assert.equal(findings[0].status, 'info');
+  assert.match(findings[0].title, /Zapisano wzorzec/);
+});
+
+test('zmiana liczby skryptów wplecionych jest odnotowana osobno', async () => {
+  const { evaluateScriptInventory } = await import('../src/checks.js');
+  const findings = evaluateScriptInventory(
+    { external: [], inlineCount: 3 },
+    { external: [], inlineCount: 1 },
+    'a.pl',
+  );
+  assert.equal(findings.find((f) => f.id === 'scripts-inline').status, 'info');
+});

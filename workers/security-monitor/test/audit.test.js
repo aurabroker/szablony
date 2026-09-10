@@ -182,3 +182,32 @@ test('kolejne tury nie kasują wiedzy o hostach spoza tury', async () => {
   assert.deepEqual(second.report.targets.map((t) => t.host), ['b.example.com']);
   assert.ok(kv.store.has('host:a.example.com'), 'wynik poprzedniej tury zostaje w KV');
 });
+
+test('wzorzec skryptów nie jest nadpisywany, gdy pojawia się obca domena', async () => {
+  const kv = fakeKv();
+  const cfg = JSON.stringify({ targets: [{ host: 'app.example.com', probePaths: [] }] });
+  const strona = (extra) =>
+    `<html><script src="/app.js"></script>${extra}</html>`;
+
+  const routes = (extra) => ({
+    'GET https://app.example.com/': {
+      body: strona(extra),
+      headers: { ...HEADERS_OK, 'content-type': 'text/html; charset=utf-8' },
+    },
+    'GET http://app.example.com/': { status: 301, headers: { location: 'https://app.example.com/' } },
+    'OPTIONS https://app.example.com/': { headers: { allow: 'GET' } },
+    'GET https://app.example.com/.well-known/security.txt': { status: 404 },
+  });
+
+  installFetch(routes(''));
+  const first = await runAudit({ MONITOR_CONFIG: cfg, MONITOR_STATE: kv }, 'test');
+  assert.match(first.report.targets[0].findings.find((f) => f.id === 'scripts').title, /Zapisano wzorzec/);
+
+  installFetch(routes('<script src="https://zla.example/skimmer.js"></script>'));
+  const second = await runAudit({ MONITOR_CONFIG: cfg, MONITOR_STATE: kv }, 'test');
+  assert.equal(second.report.targets[0].findings.find((f) => f.id === 'scripts').status, 'warn');
+
+  // trzeci przebieg: ostrzeżenie ma nadal wisieć, bo nikt go nie zaakceptował
+  const third = await runAudit({ MONITOR_CONFIG: cfg, MONITOR_STATE: kv }, 'test');
+  assert.equal(third.report.targets[0].findings.find((f) => f.id === 'scripts').status, 'warn');
+});

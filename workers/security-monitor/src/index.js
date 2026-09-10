@@ -41,7 +41,7 @@ const hostKey = (host) => `host:${host}`;
 async function auditTarget(target, env, budget, timeoutMs) {
   const kv = env.MONITOR_STATE;
   const probes = [
-    probeHeaders(target, budget, timeoutMs),
+    probeHeaders(target, budget, timeoutMs, kv),
     probeHttpRedirect(target, budget, timeoutMs),
     probeExposedPaths(target, budget, timeoutMs),
     probeAllowedMethods(target, budget, timeoutMs),
@@ -157,7 +157,7 @@ async function persistAndNotify(env, report, config, { digest = false } = {}) {
 
   const view = digest ? await loadFullView(env, config) : report;
   if (digest || shouldAlert(diff, config)) {
-    report.alert = await sendAlert(env, buildAlertText(view, diff, { digest }), view);
+    report.alert = await sendAlert(env, buildAlertText(view, diff, { digest }), view, { digest });
   } else {
     report.alert = { sent: false, reason: 'brak zmian wartych alertu' };
   }
@@ -309,6 +309,18 @@ export default {
 
     if (url.pathname === '/config') {
       return json(await loadConfig(env));
+    }
+
+    // Akceptacja nowego stanu skryptów: kasujemy wzorzec, kolejny przebieg
+    // zapisze aktualną listę jako obowiązującą.
+    if (url.pathname === '/accept') {
+      if (request.method !== 'POST') {
+        return new Response(null, { status: 405, headers: { allow: 'POST' } });
+      }
+      const host = (url.searchParams.get('host') ?? '').trim().toLowerCase();
+      if (!host) return json({ error: 'podaj ?host=' }, 400);
+      await env.MONITOR_STATE?.delete(`baseline:scripts:${host}`);
+      return json({ ok: true, host, info: 'wzorzec skryptów skasowany, następny przebieg zapisze nowy' });
     }
 
     if (url.pathname === '/run') {

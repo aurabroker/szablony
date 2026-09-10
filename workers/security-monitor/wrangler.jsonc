@@ -30,6 +30,10 @@
     // Wartość startowa. Docelowa konfiguracja mieszka w KV pod kluczem
     // monitor:config i zmienia się bez wdrożenia kodu.
     "MONITOR_CONFIG": "{\"targets\":[]}",
-    "CSP_DATASET": "csp_reports"
+    "CSP_DATASET": "csp_reports",
+    // Identyfikator konta nie jest sekretem, wiec siedzi w konfiguracji.
+    "CF_ACCOUNT_ID": "1f52c869d091ebf55a2d1789dad4842d",
+    // Link doklejany do maila. Token trzeba dopisac recznie po otwarciu.
+    "REPORT_URL": "https://security-monitor.aurabroker.workers.dev/"
   }
 }
