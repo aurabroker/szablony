@@ -160,6 +160,7 @@ export async function probeSecurityTxt(target, budget, timeoutMs) {
  * a nie czystą aplikację — dlatego sprawdzamy go osobno, syntetycznym raportem.
  */
 export async function probeCspPipeline(target, budget, timeoutMs) {
+  if (!target.checkCspPipeline) return [];
   if (!budget.take()) return skip('csp-pipeline', 'Pominięte: wyczerpany budżet podżądań');
 
   const payload = JSON.stringify({

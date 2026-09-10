@@ -2,10 +2,13 @@
  * Monitor bezpieczeństwa — Worker uruchamiany z Cron Triggers.
  *
  * Nie stoi na ścieżce żądań produkcyjnych. Cyklicznie sprawdza stan hostów,
- * zapisuje raport do KV, a alarmuje wyłącznie o zmianach względem poprzedniego
- * przebiegu. Endpoint HTTP służy do podejrzenia raportu i wymaga tokenu.
+ * zapisuje wynik per host i alarmuje wyłącznie o zmianach względem
+ * poprzedniego sprawdzenia tego samego hosta.
  *
- * wrangler.jsonc: patrz plik obok. Sekrety:
+ * Przy większej liczbie hostów jeden przebieg bierze kolejną turę
+ * (`hostsPerRun`), bo platforma limituje liczbę podżądań na wywołanie.
+ *
+ * Sekrety:
  *   MONITOR_TOKEN   — wymagany, chroni endpoint HTTP
  *   ALERT_WEBHOOK   — opcjonalny, Slack / Discord / dowolny odbiorca JSON
  *   CF_API_TOKEN    — opcjonalny, tylko odczyt: certyfikaty + Analytics Engine
@@ -28,9 +31,8 @@ import {
   probeSecurityTxt,
 } from './probes.js';
 
-const STATE_KEY = 'state:last';
-const LATEST_KEY = 'report:latest';
-const HISTORY_TTL = 60 * 60 * 24 * 30; // 30 dni
+const CURSOR_KEY = 'state:cursor';
+const hostKey = (host) => `host:${host}`;
 
 /* ------------------------------------------------------------------ */
 /* Przebieg                                                            */
@@ -68,16 +70,34 @@ async function auditTarget(target, env, budget, timeoutMs) {
   return { host: target.host, findings, summary: summarize(findings) };
 }
 
-export async function runAudit(env, trigger = 'manual') {
+/** Kolejna tura hostów, w kółko po liście celów. */
+export function selectSlice(targets, cursor, hostsPerRun) {
+  if (!hostsPerRun || hostsPerRun >= targets.length) return { slice: targets, nextCursor: 0 };
+  const start = ((cursor % targets.length) + targets.length) % targets.length;
+  const slice = [];
+  for (let i = 0; i < hostsPerRun; i += 1) slice.push(targets[(start + i) % targets.length]);
+  return { slice, nextCursor: (start + hostsPerRun) % targets.length };
+}
+
+export async function runAudit(env, trigger = 'manual', { all = false } = {}) {
   const startedAt = Date.now();
   const config = await loadConfig(env);
   const budget = new Budget(config.maxSubrequests);
+  const enabled = config.targets.filter((t) => t.enabled);
+
+  let cursor = 0;
+  if (!all && env.MONITOR_STATE) {
+    const stored = await env.MONITOR_STATE.get(CURSOR_KEY);
+    cursor = Number(stored) || 0;
+  }
+  const { slice, nextCursor } = selectSlice(enabled, cursor, all ? 0 : config.hostsPerRun);
 
   const targets = [];
-  for (const target of config.targets) {
-    if (!target.enabled) continue;
+  for (const target of slice) {
     targets.push(await auditTarget(target, env, budget, config.requestTimeoutMs));
   }
+
+  if (!all && env.MONITOR_STATE) await env.MONITOR_STATE.put(CURSOR_KEY, String(nextCursor));
 
   const allFindings = targets.flatMap((t) => t.findings);
   const report = {
@@ -85,7 +105,12 @@ export async function runAudit(env, trigger = 'manual') {
     durationMs: Date.now() - startedAt,
     trigger,
     subrequestsUsed: budget.used,
-    config: { maxSubrequests: config.maxSubrequests, problems: config.problems ?? [] },
+    config: {
+      maxSubrequests: config.maxSubrequests,
+      hostsPerRun: all ? 0 : config.hostsPerRun,
+      celeLacznie: enabled.length,
+      problems: config.problems ?? [],
+    },
     targets,
     summary: {
       hosts: targets.length,
@@ -97,38 +122,97 @@ export async function runAudit(env, trigger = 'manual') {
   return { report, config };
 }
 
+/**
+ * Zapis wyniku i alert. Stan trzymamy per host, więc tura obejmująca cztery
+ * hosty nie kasuje wiedzy o pozostałych.
+ */
 async function persistAndNotify(env, report, config, { digest = false } = {}) {
   const kv = env.MONITOR_STATE;
-  let previous = {};
-  if (kv) {
-    try {
-      previous = (await kv.get(STATE_KEY, { type: 'json' })) ?? {};
-    } catch {
-      previous = {};
+  const diff = { nowe: [], pogorszone: [], naprawione: [] };
+
+  for (const target of report.targets) {
+    let previous = null;
+    if (kv) {
+      try {
+        previous = await kv.get(hostKey(target.host), { type: 'json' });
+      } catch {
+        previous = null;
+      }
+    }
+    const nextState = toState([target]);
+    const partial = diffStates(previous?.state ?? {}, nextState);
+    diff.nowe.push(...partial.nowe);
+    diff.pogorszone.push(...partial.pogorszone);
+    diff.naprawione.push(...partial.naprawione);
+
+    if (kv) {
+      await kv.put(
+        hostKey(target.host),
+        JSON.stringify({ ...target, state: nextState, checkedAt: report.generatedAt }),
+      );
     }
   }
 
-  const next = toState(report.targets);
-  const diff = diffStates(previous, next);
   report.diff = diff;
 
-  if (kv) {
-    const stamp = report.generatedAt.replace(/[:.]/g, '-');
-    await Promise.all([
-      kv.put(LATEST_KEY, JSON.stringify(report)),
-      kv.put(`report:${stamp}`, JSON.stringify(report), { expirationTtl: HISTORY_TTL }),
-      kv.put(STATE_KEY, JSON.stringify(next)),
-    ]);
-  }
-
+  const view = digest ? await loadFullView(env, config) : report;
   if (digest || shouldAlert(diff, config)) {
-    const text = buildAlertText(report, diff, { digest });
-    report.alert = await sendAlert(env, text, report);
+    report.alert = await sendAlert(env, buildAlertText(view, diff, { digest }), view);
   } else {
     report.alert = { sent: false, reason: 'brak zmian wartych alertu' };
   }
 
   return report;
+}
+
+/** Widok wszystkich hostów, złożony z ostatnich znanych wyników. */
+export async function loadFullView(env, config) {
+  const kv = env.MONITOR_STATE;
+  const records = kv
+    ? await Promise.all(
+        config.targets.map(async (t) => {
+          try {
+            return await kv.get(hostKey(t.host), { type: 'json' });
+          } catch {
+            return null;
+          }
+        }),
+      )
+    : [];
+
+  const targets = [];
+  for (const [index, record] of records.entries()) {
+    const host = config.targets[index].host;
+    if (record) targets.push({ host, findings: record.findings, summary: record.summary, checkedAt: record.checkedAt });
+    else {
+      targets.push({
+        host,
+        findings: [{ id: 'pending', status: 'skip', title: 'Host czeka na pierwsze sprawdzenie', detail: null }],
+        summary: summarize([{ status: 'skip' }]),
+        checkedAt: null,
+      });
+    }
+  }
+
+  const checked = targets.map((t) => t.checkedAt).filter(Boolean).sort();
+  return {
+    generatedAt: checked[checked.length - 1] ?? new Date().toISOString(),
+    durationMs: 0,
+    trigger: 'widok zbiorczy',
+    subrequestsUsed: 0,
+    config: {
+      maxSubrequests: config.maxSubrequests,
+      hostsPerRun: config.hostsPerRun,
+      celeLacznie: config.targets.length,
+      problems: config.problems ?? [],
+    },
+    targets,
+    summary: {
+      hosts: targets.length,
+      counts: summarize(targets.flatMap((t) => t.findings)).counts,
+      worst: worst(targets.map((t) => t.summary.worst)),
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -187,11 +271,11 @@ export default {
           // Ostatnia linia obrony: monitor, który cicho umiera, jest gorszy niż brak monitora.
           console.error('przebieg monitora nie powiódł się', error);
           if (env.ALERT_WEBHOOK) {
-            await sendAlert(
-              env,
-              `[Monitor] Przebieg zakończony wyjątkiem: ${String(error?.message ?? error)}`,
-              { generatedAt: new Date().toISOString(), summary: {}, targets: [] },
-            );
+            await sendAlert(env, `[Monitor] Przebieg zakończony wyjątkiem: ${String(error?.message ?? error)}`, {
+              generatedAt: new Date().toISOString(),
+              summary: { hosts: 0, worst: 'fail' },
+              targets: [],
+            });
           }
         }
       })(),
@@ -207,14 +291,9 @@ export default {
     if (denied) return denied;
 
     if (url.pathname === '/' || url.pathname === '/report') {
-      const stored = await env.MONITOR_STATE?.get(LATEST_KEY, { type: 'json' });
-      if (!stored) {
-        return new Response('Brak zapisanego raportu. Uruchom przebieg: POST /run\n', {
-          status: 404,
-          headers: { 'content-type': 'text/plain; charset=utf-8' },
-        });
-      }
-      return new Response(renderReportHtml(stored), {
+      const config = await loadConfig(env);
+      const view = await loadFullView(env, config);
+      return new Response(renderReportHtml(view), {
         headers: {
           'content-type': 'text/html; charset=utf-8',
           'cache-control': 'no-store',
@@ -224,20 +303,20 @@ export default {
     }
 
     if (url.pathname === '/report.json') {
-      const stored = await env.MONITOR_STATE?.get(LATEST_KEY, { type: 'json' });
-      return stored ? json(stored) : json({ error: 'brak zapisanego raportu' }, 404);
+      const config = await loadConfig(env);
+      return json(await loadFullView(env, config));
     }
 
     if (url.pathname === '/config') {
-      const config = await loadConfig(env);
-      return json(config);
+      return json(await loadConfig(env));
     }
 
     if (url.pathname === '/run') {
       if (request.method !== 'POST') {
         return new Response(null, { status: 405, headers: { allow: 'POST' } });
       }
-      const { report, config } = await runAudit(env, 'manual');
+      const all = url.searchParams.get('all') === '1';
+      const { report, config } = await runAudit(env, 'manual', { all });
       await persistAndNotify(env, report, config, { digest: url.searchParams.get('digest') === '1' });
       return json(report);
     }

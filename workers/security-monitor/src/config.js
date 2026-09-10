@@ -15,6 +15,9 @@ export const DEFAULT_CONFIG = {
   targets: [],
   // ile podżądań wolno zużyć na jeden przebieg; plan darmowy daje 50
   maxSubrequests: 45,
+  // ile hostów bierze jeden przebieg; 0 = wszystkie. Przy wielu hostach
+  // rozkładamy audyt na kolejne tury, żeby zmieścić się w limicie podżądań.
+  hostsPerRun: 4,
   requestTimeoutMs: 10000,
   // cron, po którym wysyłamy pełne podsumowanie niezależnie od zmian
   digestCron: '0 6 * * *',
@@ -76,6 +79,9 @@ export function normalizeTarget(raw) {
       typeof source.cspReportPath === 'string' && source.cspReportPath.startsWith('/')
         ? source.cspReportPath
         : '/__csp-report',
+    // Sonda kanału raportów ma sens tylko tam, gdzie stoi Worker nagłówkowy.
+    // Domyślnie wyłączona, żeby nie produkować 404 jako fałszywych błędów.
+    checkCspPipeline: source.checkCspPipeline === true,
     checkHttpRedirect: source.checkHttpRedirect !== false,
     checkSecurityTxt: source.checkSecurityTxt !== false,
     enabled: source.enabled !== false,
@@ -100,6 +106,7 @@ export function sanitizeConfig(raw) {
   return {
     targets,
     maxSubrequests: clampInt(raw.maxSubrequests, 5, 900, DEFAULT_CONFIG.maxSubrequests),
+    hostsPerRun: clampInt(raw.hostsPerRun, 0, 200, DEFAULT_CONFIG.hostsPerRun),
     requestTimeoutMs: clampInt(raw.requestTimeoutMs, 1000, 30000, DEFAULT_CONFIG.requestTimeoutMs),
     digestCron:
       typeof raw.digestCron === 'string' ? raw.digestCron.trim() : DEFAULT_CONFIG.digestCron,

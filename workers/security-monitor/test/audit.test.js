@@ -43,7 +43,7 @@ function installFetch(routes) {
 }
 
 const env = (extra = {}) => ({
-  MONITOR_CONFIG: JSON.stringify({ targets: [{ host: 'app.example.com', probePaths: ['/.env'], assets: [] }] }),
+  MONITOR_CONFIG: JSON.stringify({ targets: [{ host: 'app.example.com', probePaths: ['/.env'], assets: [], checkCspPipeline: true }] }),
   MONITOR_STATE: fakeKv(),
   ...extra,
 });
@@ -123,7 +123,7 @@ test('wzorzec hasha zapisuje się przy pierwszym przebiegu, a zmiana jest błęd
   const kv = fakeKv();
   const withAsset = {
     MONITOR_CONFIG: JSON.stringify({
-      targets: [{ host: 'app.example.com', probePaths: [], assets: ['https://app.example.com/app.js'] }],
+      targets: [{ host: 'app.example.com', probePaths: [], assets: ['https://app.example.com/app.js'], checkCspPipeline: true }],
     }),
     MONITOR_STATE: kv,
   };
@@ -146,4 +146,39 @@ test('wzorzec hasha zapisuje się przy pierwszym przebiegu, a zmiana jest błęd
   const asset = second.report.targets[0].findings.find((f) => f.id.startsWith('asset:'));
   assert.equal(asset.status, 'fail');
   assert.match(asset.title, /Zmiana zawartości/);
+});
+
+test('tura bierze kolejne hosty i wraca na początek listy', async () => {
+  const { selectSlice } = await import('../src/index.js');
+  const targets = ['a', 'b', 'c', 'd', 'e'];
+
+  const first = selectSlice(targets, 0, 2);
+  assert.deepEqual(first.slice, ['a', 'b']);
+  assert.equal(first.nextCursor, 2);
+
+  const second = selectSlice(targets, first.nextCursor, 2);
+  assert.deepEqual(second.slice, ['c', 'd']);
+
+  const third = selectSlice(targets, second.nextCursor, 2);
+  assert.deepEqual(third.slice, ['e', 'a'], 'ostatnia tura zawija się na początek');
+
+  assert.deepEqual(selectSlice(targets, 3, 0).slice, targets, 'zero znaczy wszystkie hosty');
+});
+
+test('kolejne tury nie kasują wiedzy o hostach spoza tury', async () => {
+  const kv = fakeKv();
+  const cfg = JSON.stringify({
+    hostsPerRun: 1,
+    targets: [{ host: 'a.example.com', probePaths: [] }, { host: 'b.example.com', probePaths: [] }],
+  });
+  installFetch({});
+
+  const { runAudit } = await import('../src/index.js');
+  const first = await runAudit({ MONITOR_CONFIG: cfg, MONITOR_STATE: kv }, 'test');
+  assert.deepEqual(first.report.targets.map((t) => t.host), ['a.example.com']);
+
+  await kv.put('host:a.example.com', JSON.stringify({ host: 'a.example.com', findings: [], summary: {}, state: {} }));
+  const second = await runAudit({ MONITOR_CONFIG: cfg, MONITOR_STATE: kv }, 'test');
+  assert.deepEqual(second.report.targets.map((t) => t.host), ['b.example.com']);
+  assert.ok(kv.store.has('host:a.example.com'), 'wynik poprzedniej tury zostaje w KV');
 });

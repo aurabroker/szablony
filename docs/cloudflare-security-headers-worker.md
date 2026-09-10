@@ -629,6 +629,45 @@ hostów w `monitor:config`, sekret `MONITOR_TOKEN` i opcjonalnie `ALERT_WEBHOOK`
 Instrukcja krok po kroku jest w `workers/security-monitor/README.md`.
 
 
+### Stan wdrożenia (2026-09-10)
+
+Monitor jest wdrożony na koncie `Aurabroker@gmail.com's Account`.
+
+| Element | Wartość |
+|---|---|
+| Worker | `security-monitor` |
+| Adres | `https://security-monitor.aurabroker.workers.dev` |
+| Namespace KV | `MONITOR_STATE`, id `2cd37ecafa334baabcc4ae52bb8419b7` |
+| Harmonogram | `0 * * * *` audyt, `0 6 * * *` przegląd dobowy |
+| Cele | 18 domen apex ze wszystkich stref na koncie |
+| Hostów na turę | 4, czyli pełny obieg co 5 godzin |
+| Podżądań na turę | około 28 z 45 dostępnych |
+| Sekrety ustawione | `MONITOR_TOKEN` |
+| Sekrety nieustawione | `ALERT_WEBHOOK`, `CF_API_TOKEN`, `CF_ACCOUNT_ID` |
+
+Bez `ALERT_WEBHOOK` monitor działa w trybie cichym: wyniki lądują w KV i są
+widoczne pod adresem Workera po podaniu tokenu. Bez `CF_API_TOKEN` sondy
+certyfikatu i raportów CSP zgłaszają status `skip`.
+
+Dwie zmiany wymuszone realiami tego konta:
+
+- **Podział przebiegu na tury.** 18 hostów po około 7 podżądań to 126 na przebieg,
+  a plan darmowy dopuszcza 50. Kolejne wywołania biorą kolejne cztery hosty,
+  kursor siedzi w KV. Stan trzymamy per host, więc tura nie kasuje wiedzy
+  o hostach spoza niej.
+- **Sonda kanału raportów CSP jest domyślnie wyłączona.** Żaden z tych hostów
+  nie ma Workera nagłówkowego, więc `/__csp-report` zwracałby 404 i produkował
+  osiemnaście fałszywych błędów. Włącza się per host flagą `checkCspPipeline`.
+
+Konfiguracja celów leży w KV pod kluczem `monitor:config`, kopia w repozytorium
+w `workers/security-monitor/config/monitor-config.aura.json`. Zmiana listy
+hostów nie wymaga wdrożenia kodu.
+
+Sandbox tej sesji wypuszcza ruch wyłącznie do API Cloudflare, więc pierwszego
+przebiegu nie dało się odpalić stąd ani przez adres Workera, ani przez
+`wrangler dev --remote`. Pierwszy audyt wykona harmonogram.
+
+
 ## Załącznik A — snapshot kodu wejściowego (v0, niewdrożony)
 
 ```js

@@ -1,0 +1,301 @@
+{
+  "_opis": "Konfiguracja monitora bezpieczenstwa. Zmiana tego klucza nie wymaga wdrozenia kodu.",
+  "maxSubrequests": 45,
+  "hostsPerRun": 4,
+  "requestTimeoutMs": 10000,
+  "digestCron": "0 6 * * *",
+  "alerts": {
+    "minStatus": "warn",
+    "notifyOnRecovery": true
+  },
+  "targets": [
+    {
+      "host": "auraconsulting.pl",
+      "zone": "auraconsulting.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "auraexpert.pl",
+      "zone": "auraexpert.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "beautypolisa.eu",
+      "zone": "beautypolisa.eu",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "grupowe.pro",
+      "zone": "grupowe.pro",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "gwarancje.pro",
+      "zone": "gwarancje.pro",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "idzik.org.pl",
+      "zone": "idzik.org.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "rozwodbemowo.pl",
+      "zone": "rozwodbemowo.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "rozwodbielany.pl",
+      "zone": "rozwodbielany.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "rozwodjablonna.pl",
+      "zone": "rozwodjablonna.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "rozwodlegionowo.pl",
+      "zone": "rozwodlegionowo.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "rozwodlomianki.pl",
+      "zone": "rozwodlomianki.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "rozwodmokotow.pl",
+      "zone": "rozwodmokotow.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "rozwodochota.pl",
+      "zone": "rozwodochota.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "rozwodtarchomin.pl",
+      "zone": "rozwodtarchomin.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "rozwod.waw.pl",
+      "zone": "rozwod.waw.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "rozwodwola.pl",
+      "zone": "rozwodwola.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "rozwodzoliborz.pl",
+      "zone": "rozwodzoliborz.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    },
+    {
+      "host": "utratadochodu.pl",
+      "zone": "utratadochodu.pl",
+      "probePaths": [
+        "/.env",
+        "/.git/config",
+        "/config.json"
+      ],
+      "checkHttpRedirect": true,
+      "checkSecurityTxt": true,
+      "checkCspPipeline": false,
+      "expect": {
+        "csp": "any",
+        "hstsMinAge": 15552000
+      }
+    }
+  ]
+}

@@ -57,3 +57,8 @@ test('extractDomain odsiewa szum z rozszerzeń przeglądarki', () => {
   assert.equal(extractDomain('inline'), null);
   assert.equal(extractDomain('https://Analytics.Example.com/x.js'), 'analytics.example.com');
 });
+
+test('sonda kanału raportów CSP jest domyślnie wyłączona', () => {
+  assert.equal(normalizeTarget('a.example.com').checkCspPipeline, false);
+  assert.equal(normalizeTarget({ host: 'a.example.com', checkCspPipeline: true }).checkCspPipeline, true);
+});

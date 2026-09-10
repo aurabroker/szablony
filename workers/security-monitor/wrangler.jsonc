@@ -9,6 +9,8 @@
   // Endpoint HTTP służy tylko do podejrzenia raportu i jest chroniony tokenem.
   // Bez sekretu MONITOR_TOKEN zwraca 503 i nie wydaje żadnych danych.
   "workers_dev": true,
+  // Adresy podglądowe per wersja nie są potrzebne, a mnożą punkty dostępu.
+  "preview_urls": false,
 
   "observability": { "enabled": true },
 
@@ -21,7 +23,7 @@
 
   "kv_namespaces": [
     // npx wrangler kv namespace create MONITOR_STATE
-    { "binding": "MONITOR_STATE", "id": "UZUPELNIJ_ID_NAMESPACE" }
+    { "binding": "MONITOR_STATE", "id": "2cd37ecafa334baabcc4ae52bb8419b7" }
   ],
 
   "vars": {
