@@ -1,0 +1,73 @@
+# Plan awaryjny dla monitora bezpieczeństwa.
+#
+# Worker ma własne Cron Triggers i normalnie to one wykonują przebieg.
+# Ten workflow jest zapasowym wyzwalaczem na wypadek, gdyby harmonogram
+# po stronie Cloudflare nie zadziałał. Uderza w ten sam endpoint co cron,
+# więc podwójne uruchomienie niczego nie psuje: przebieg jest idempotentny,
+# a alert leci wyłącznie przy zmianie stanu.
+#
+# Wymagany sekret repozytorium: MONITOR_TOKEN
+# Ustawienia → Secrets and variables → Actions → New repository secret
+
+name: Monitor bezpieczeństwa
+
+on:
+  schedule:
+    - cron: '7 * * * *' # co godzinę, przesunięte o 7 minut od crona Cloudflare
+  workflow_dispatch:
+    inputs:
+      wszystkie_hosty:
+        description: 'Sprawdzić wszystkie hosty naraz zamiast kolejnej tury'
+        type: boolean
+        default: false
+
+jobs:
+  audyt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Uruchom przebieg audytu
+        env:
+          MONITOR_TOKEN: ${{ secrets.MONITOR_TOKEN }}
+          WSZYSTKIE: ${{ inputs.wszystkie_hosty && '1' || '0' }}
+        run: |
+          if [ -z "$MONITOR_TOKEN" ]; then
+            echo "Brak sekretu MONITOR_TOKEN w ustawieniach repozytorium."
+            exit 1
+          fi
+
+          ADRES="https://security-monitor.aurabroker.workers.dev/run?all=$WSZYSTKIE"
+
+          KOD=$(curl -sS -X POST "$ADRES" \
+            -H "Authorization: Bearer $MONITOR_TOKEN" \
+            -o odpowiedz.json -w '%{http_code}' --max-time 120)
+
+          echo "HTTP $KOD"
+          if [ "$KOD" != "200" ]; then
+            echo "Przebieg nie powiódł się:"
+            head -c 2000 odpowiedz.json
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+          raport = json.load(open('odpowiedz.json'))
+          podsumowanie = raport['summary']
+          print(f"Sprawdzono hostów: {podsumowanie['hosts']}, stan ogólny: {podsumowanie['worst']}")
+          print(f"Liczniki: {podsumowanie['counts']}")
+          print(f"Alert: {raport.get('alert')}")
+          for cel in raport['targets']:
+              zle = [f["title"] for f in cel['findings'] if f['status'] in ('fail', 'warn')]
+              print(f"\n{cel['host']} → {cel['summary']['worst']}")
+              for tytul in zle[:10]:
+                  print(f"  - {tytul}")
+          PY
+
+      - name: Zapisz surowy raport jako artefakt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raport-audytu
+          path: odpowiedz.json
+          retention-days: 14
+          if-no-files-found: ignore
