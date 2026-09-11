@@ -163,13 +163,25 @@ export async function probeExposedPaths(target, budget, timeoutMs) {
       continue;
     }
     if (response.status === 200) {
-      const type = response.headers.get('content-type') ?? '';
-      findings.push({
-        id: `path:${path}`,
-        status: 'fail',
-        title: `Wrażliwa ścieżka odpowiada 200: ${path}`,
-        detail: { 'content-type': type },
-      });
+      const type = (response.headers.get('content-type') ?? '').toLowerCase();
+      // Większość stron zwraca stronę główną na każdy nieznany adres. Sam kod 200
+      // nic więc nie znaczy; realnym sygnałem jest odpowiedź, która NIE jest HTML-em,
+      // bo plik .env czy .git/config nigdy nie ma typu text/html.
+      if (type.includes('text/html')) {
+        findings.push({
+          id: `path:${path}`,
+          status: 'ok',
+          title: `${path} → 200, ale to strona HTML (odpowiedź zastępcza, nie plik)`,
+          detail: null,
+        });
+      } else {
+        findings.push({
+          id: `path:${path}`,
+          status: 'fail',
+          title: `Wrażliwa ścieżka zwraca prawdziwy plik: ${path}`,
+          detail: { 'content-type': type || 'brak' },
+        });
+      }
     } else {
       findings.push({ id: `path:${path}`, status: 'ok', title: `${path} → ${response.status}`, detail: null });
     }

@@ -211,3 +211,23 @@ test('wzorzec skryptów nie jest nadpisywany, gdy pojawia się obca domena', asy
   const third = await runAudit({ MONITOR_CONFIG: cfg, MONITOR_STATE: kv }, 'test');
   assert.equal(third.report.targets[0].findings.find((f) => f.id === 'scripts').status, 'warn');
 });
+
+test('strona zastepcza na wrazliwej sciezce nie jest bledem, prawdziwy plik jest', async () => {
+  const wspolne = {
+    'GET https://app.example.com/': { headers: { ...HEADERS_OK, 'content-type': 'text/html' } },
+    'GET http://app.example.com/': { status: 301, headers: { location: 'https://app.example.com/' } },
+    'OPTIONS https://app.example.com/': { headers: { allow: 'GET' } },
+    'GET https://app.example.com/.well-known/security.txt': { status: 404 },
+  };
+  const cfg = JSON.stringify({ targets: [{ host: 'app.example.com', probePaths: ['/.env'], checkScripts: false }] });
+
+  // katch-all SPA: 200, ale text/html
+  installFetch({ ...wspolne, 'GET https://app.example.com/.env': { status: 200, body: '<html>404</html>', headers: { 'content-type': 'text/html; charset=utf-8' } } });
+  const spa = await runAudit({ MONITOR_CONFIG: cfg, MONITOR_STATE: fakeKv() }, 'test');
+  assert.equal(spa.report.targets[0].findings.find((f) => f.id === 'path:/.env').status, 'ok');
+
+  // prawdziwy plik konfiguracyjny
+  installFetch({ ...wspolne, 'GET https://app.example.com/.env': { status: 200, body: 'DB_PASSWORD=1', headers: { 'content-type': 'text/plain' } } });
+  const plik = await runAudit({ MONITOR_CONFIG: cfg, MONITOR_STATE: fakeKv() }, 'test');
+  assert.equal(plik.report.targets[0].findings.find((f) => f.id === 'path:/.env').status, 'fail');
+});
