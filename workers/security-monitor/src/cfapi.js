@@ -56,7 +56,30 @@ export async function probeCertificate(target, env, budget) {
 
   try {
     const zoneId = await resolveZoneId(env, target.zone);
-    if (!zoneId) return [{ id: 'certificate', status: 'warn', title: `Strefa ${target.zone} niewidoczna na koncie`, detail: null }];
+    if (!zoneId) {
+      // Pusta odpowiedź przy udanym wywołaniu znaczy, że token jest ważny, ale
+      // ta strefa nie mieści się w jego zakresie. Liczba stref, które w ogóle
+      // widzi, od razu mówi, czy to kwestia uprawnienia, czy zakresu zasobów.
+      let widoczne = null;
+      try {
+        const wszystkie = await api(env, '/zones?per_page=1');
+        widoczne = wszystkie?.result_info?.total_count ?? null;
+      } catch {
+        widoczne = null;
+      }
+      const wskazowka =
+        widoczne === 0
+          ? 'token nie widzi żadnej strefy: brak uprawnienia Zone → Zone → Read'
+          : widoczne
+            ? `token widzi ${widoczne} stref, ale nie tę: w zakresie zasobów ustaw Include → All zones`
+            : 'nie udało się ustalić, ile stref widzi token';
+      return [{
+        id: 'certificate',
+        status: 'warn',
+        title: `Strefa ${target.zone} poza zakresem tokenu`,
+        detail: { wskazowka, stref_widocznych: widoczne },
+      }];
+    }
 
     const json = await api(env, `/zones/${zoneId}/ssl/certificate_packs?status=all`);
     const packs = Array.isArray(json?.result) ? json.result : [];
