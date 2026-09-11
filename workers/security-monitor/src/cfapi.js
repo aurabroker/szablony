@@ -6,6 +6,8 @@
  * Account Analytics: Read). Trzymany jako secret CF_API_TOKEN.
  */
 
+import { evaluateDns } from './checks.js';
+
 const API = 'https://api.cloudflare.com/client/v4';
 
 const skip = (id, title) => [{ id, status: 'skip', title, detail: null }];
@@ -191,5 +193,22 @@ export async function probeCspViolations(target, env, budget) {
     }];
   } catch (error) {
     return [{ id: 'csp-domains', status: 'warn', title: 'Nie udało się odczytać raportów CSP', detail: { blad: String(error.message ?? error) } }];
+  }
+}
+
+/** Rekordy DNS strefy: poczta i to, czy ruch faktycznie idzie przez Cloudflare. */
+export async function probeDns(target, env, budget) {
+  if (!env.CF_API_TOKEN) return skip('dns', 'Pominięte: brak CF_API_TOKEN');
+  if (!target.zoneId && !target.zone) return skip('dns', 'Pominięte: cel nie ma ani zone, ani zoneId');
+  if (!budget.take(target.zoneId ? 1 : 2)) return skip('dns', 'Pominięte: wyczerpany budżet podżądań');
+
+  try {
+    const zoneId = target.zoneId ?? (await resolveZoneId(env, target.zone));
+    if (!zoneId) return [{ id: 'dns', status: 'warn', title: 'Nie udało się ustalić strefy', detail: null }];
+
+    const json = await api(env, `/zones/${zoneId}/dns_records?per_page=200`);
+    return evaluateDns(json?.result ?? [], target.host);
+  } catch (error) {
+    return [{ id: 'dns', status: 'warn', title: 'Nie udało się odczytać rekordów DNS', detail: { blad: String(error.message ?? error) } }];
   }
 }

@@ -215,3 +215,51 @@ test('zmiana liczby skryptów wplecionych jest odnotowana osobno', async () => {
   );
   assert.equal(findings.find((f) => f.id === 'scripts-inline').status, 'info');
 });
+
+const dns = (rekordy) => rekordy.map((r) => ({ proxied: true, ...r }));
+const znajdz = (f, id) => f.find((x) => x.id === id);
+
+test('brak DMARC to blad, brak SPF przy dzialajacej poczcie tez', async () => {
+  const { evaluateDns } = await import('../src/checks.js');
+  const f = evaluateDns(dns([{ type: 'MX', name: 'a.pl', content: 'mx.a.pl' }, { type: 'A', name: 'a.pl' }]), 'a.pl');
+  assert.equal(znajdz(f, 'dmarc').status, 'fail');
+  assert.equal(znajdz(f, 'spf').status, 'fail');
+  assert.equal(znajdz(f, 'dkim').status, 'warn');
+});
+
+test('domena bez poczty nadal potrzebuje DMARC, ale brak SPF to tylko ostrzezenie', async () => {
+  const { evaluateDns } = await import('../src/checks.js');
+  const f = evaluateDns(dns([{ type: 'A', name: 'a.pl' }]), 'a.pl');
+  assert.equal(znajdz(f, 'spf').status, 'warn');
+  assert.equal(znajdz(f, 'dmarc').status, 'fail');
+  assert.equal(znajdz(f, 'dkim'), undefined, 'bez poczty nie wymagamy DKIM');
+});
+
+test('DMARC tylko obserwujacy to ostrzezenie, egzekwowany to ok', async () => {
+  const { evaluateDns } = await import('../src/checks.js');
+  const zRekordem = (tresc) =>
+    evaluateDns(dns([{ type: 'TXT', name: '_dmarc.a.pl', content: tresc }, { type: 'A', name: 'a.pl' }]), 'a.pl');
+  assert.equal(znajdz(zRekordem('v=DMARC1; p=none'), 'dmarc').status, 'warn');
+  assert.equal(znajdz(zRekordem('v=DMARC1; p=quarantine'), 'dmarc').status, 'ok');
+  assert.equal(znajdz(zRekordem('"v=DMARC1; p=reject; rua=mailto:a@a.pl"'), 'dmarc').status, 'ok');
+});
+
+test('SPF konczacy sie ~all nie odrzuca obcych nadawcow', async () => {
+  const { evaluateDns } = await import('../src/checks.js');
+  const zSpf = (tresc) => evaluateDns(dns([{ type: 'TXT', name: 'a.pl', content: tresc }]), 'a.pl');
+  assert.equal(znajdz(zSpf('v=spf1 include:_spf.google.com ~all'), 'spf').status, 'warn');
+  assert.equal(znajdz(zSpf('v=spf1 include:_spf.google.com -all'), 'spf').status, 'ok');
+  assert.equal(znajdz(zSpf('v=spf1 -all'), 'spf').status, 'ok');
+});
+
+test('rekord z wylaczonym proxy jest zglaszany', async () => {
+  const { evaluateDns } = await import('../src/checks.js');
+  const f = evaluateDns([{ type: 'A', name: 'www.a.pl', proxied: false }, { type: 'A', name: 'a.pl', proxied: true }], 'a.pl');
+  assert.equal(znajdz(f, 'proxy').status, 'warn');
+  assert.match(znajdz(f, 'proxy').title, /www\.a\.pl/);
+});
+
+test('caly ruch za proxy to ok', async () => {
+  const { evaluateDns } = await import('../src/checks.js');
+  assert.equal(znajdz(evaluateDns(dns([{ type: 'A', name: 'a.pl' }]), 'a.pl'), 'proxy').status, 'ok');
+});

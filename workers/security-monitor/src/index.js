@@ -19,7 +19,7 @@ import { summarize, toState, diffStates, worst } from './checks.js';
 import { loadConfig } from './config.js';
 import { buildAlertText, sendAlert, shouldAlert } from './alert.js';
 import { renderReportHtml } from './report.js';
-import { probeCertificate, probeCspViolations } from './cfapi.js';
+import { probeCertificate, probeCspViolations, probeDns } from './cfapi.js';
 import {
   Budget,
   probeAllowedMethods,
@@ -50,6 +50,7 @@ async function auditTarget(target, env, budget, timeoutMs) {
     probeAssetHashes(target, budget, timeoutMs, kv),
     probeCertificate(target, env, budget),
     probeCspViolations(target, env, budget),
+    probeDns(target, env, budget),
   ];
 
   // Awaria pojedynczej sondy nie może przerwać audytu pozostałych.

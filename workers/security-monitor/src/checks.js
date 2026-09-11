@@ -462,3 +462,95 @@ export function evaluateScriptInventory(current, baseline, host) {
 
   return out;
 }
+
+/* ------------------------------------------------------------------ */
+/* Poczta i stan proxy w DNS                                           */
+/* ------------------------------------------------------------------ */
+
+const txtTresc = (r) => String(r.content ?? '').replace(/^"|"$/g, '').trim();
+
+/**
+ * Ocena rekordów DNS strefy pod kątem podszywania się pod domenę i tego,
+ * czy ruch w ogóle przechodzi przez Cloudflare.
+ *
+ * Brak DMARC to nie jest problem techniczny, tylko biznesowy: bez niego
+ * każdy może wysłać maila wyglądającego na pismo z kancelarii.
+ */
+export function evaluateDns(records, host) {
+  const lista = Array.isArray(records) ? records : [];
+  const out = [];
+
+  const txt = lista.filter((r) => r.type === 'TXT');
+  const spf = txt.find((r) => r.name === host && /^v=spf1\b/i.test(txtTresc(r)));
+  const dmarc = txt.find((r) => r.name === `_dmarc.${host}` && /^v=DMARC1\b/i.test(txtTresc(r)));
+  const dkim = lista.some((r) => r.name.includes('._domainkey'));
+  const maMx = lista.some((r) => r.type === 'MX');
+
+  // --- SPF ---
+  if (!spf) {
+    out.push({
+      id: 'spf',
+      status: maMx ? 'fail' : 'warn',
+      title: 'Brak rekordu SPF',
+      detail: { skutek: 'dowolny serwer może wysyłać pocztę podającą się za tę domenę' },
+    });
+  } else {
+    const tresc = txtTresc(spf);
+    const luzny = /[?~]all\s*$/.test(tresc) || !/all\s*$/.test(tresc);
+    out.push({
+      id: 'spf',
+      status: luzny ? 'warn' : 'ok',
+      title: luzny ? 'SPF jest, ale nie odrzuca obcych nadawców' : 'SPF poprawny',
+      detail: { rekord: tresc.slice(0, 200) },
+    });
+  }
+
+  // --- DMARC ---
+  if (!dmarc) {
+    out.push({
+      id: 'dmarc',
+      status: 'fail',
+      title: 'Brak rekordu DMARC',
+      detail: { skutek: 'nikt nie blokuje maili podszywających się pod tę domenę' },
+    });
+  } else {
+    const tresc = txtTresc(dmarc);
+    const polityka = (/\bp\s*=\s*(none|quarantine|reject)/i.exec(tresc) ?? [])[1]?.toLowerCase() ?? 'brak';
+    out.push({
+      id: 'dmarc',
+      status: polityka === 'none' || polityka === 'brak' ? 'warn' : 'ok',
+      title:
+        polityka === 'none'
+          ? 'DMARC tylko obserwuje (p=none), nic nie blokuje'
+          : polityka === 'brak'
+            ? 'DMARC bez ustawionej polityki'
+            : `DMARC egzekwowany (p=${polityka})`,
+      detail: { rekord: tresc.slice(0, 200) },
+    });
+  }
+
+  // --- DKIM ---
+  if (maMx && !dkim) {
+    out.push({ id: 'dkim', status: 'warn', title: 'Domena odbiera pocztę, ale nie ma podpisu DKIM', detail: null });
+  }
+
+  // --- ruch przez Cloudflare ---
+  const webowe = lista.filter(
+    (r) => ['A', 'AAAA', 'CNAME'].includes(r.type) && (r.name === host || r.name === `www.${host}`),
+  );
+  const bezProxy = webowe.filter((r) => r.proxied === false).map((r) => r.name);
+  if (webowe.length === 0) {
+    out.push({ id: 'proxy', status: 'info', title: 'Brak rekordów wskazujących stronę www', detail: null });
+  } else if (bezProxy.length) {
+    out.push({
+      id: 'proxy',
+      status: 'warn',
+      title: `Ruch omija Cloudflare: ${bezProxy.join(', ')}`,
+      detail: { skutek: 'nie działają tam reguły ochronne ani nagłówki dokładane na brzegu' },
+    });
+  } else {
+    out.push({ id: 'proxy', status: 'ok', title: 'Cały ruch www idzie przez Cloudflare', detail: null });
+  }
+
+  return out;
+}
