@@ -23,7 +23,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "6340a33ebc8e513dd8cf5eae4206439d"
     },
     {
       "host": "auraexpert.pl",
@@ -39,7 +40,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "3a12bd2b6da77362d69e831b6bcef731"
     },
     {
       "host": "beautypolisa.eu",
@@ -57,7 +59,8 @@
         "hstsMinAge": 15552000
       },
       "enabled": false,
-      "_uwaga": "Brak serwisu pod tym adresem. Wlaczyc ponownie po uruchomieniu strony."
+      "_uwaga": "Brak serwisu pod tym adresem. Wlaczyc ponownie po uruchomieniu strony.",
+      "zoneId": "c61673ea4d248d75bc769b65c65af3a7"
     },
     {
       "host": "grupowe.pro",
@@ -73,7 +76,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "12f18f72e0a2482af8b3bb210beda473"
     },
     {
       "host": "gwarancje.pro",
@@ -89,7 +93,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "68be8eb68ba0ea4cb42d3d12d9442746"
     },
     {
       "host": "idzik.org.pl",
@@ -105,7 +110,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "c31b69e84c156d84a1a7520ebe9e2a79"
     },
     {
       "host": "rozwodbemowo.pl",
@@ -121,7 +127,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "7f4fbc48c13d93083939b30504882400"
     },
     {
       "host": "rozwodbielany.pl",
@@ -137,7 +144,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "edc62e38bc77fd8613e8280831b018c1"
     },
     {
       "host": "rozwodjablonna.pl",
@@ -153,7 +161,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "debc10699d07b7c04e3be8773137a800"
     },
     {
       "host": "rozwodlegionowo.pl",
@@ -169,7 +178,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "8cf321515dc95eca2a28c60286fa106c"
     },
     {
       "host": "rozwodlomianki.pl",
@@ -185,7 +195,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "9cb2da158d2f02febf8a7c50b1c81a0b"
     },
     {
       "host": "rozwodmokotow.pl",
@@ -201,7 +212,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "9c1d86514a2f04a0154ef68c2111e56b"
     },
     {
       "host": "rozwodochota.pl",
@@ -217,7 +229,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "d6e1b8b7f0e448ee513d66f4dd0adb3c"
     },
     {
       "host": "rozwodtarchomin.pl",
@@ -233,7 +246,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "8c9a402c4c502b8801b2c9fc96ad3056"
     },
     {
       "host": "rozwod.waw.pl",
@@ -249,7 +263,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "3a6c51faa9651cddb0eb559a508093f2"
     },
     {
       "host": "rozwodwola.pl",
@@ -265,7 +280,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "8f892becfd6d9a31139914e075b94065"
     },
     {
       "host": "rozwodzoliborz.pl",
@@ -281,7 +297,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "1d9d87bc579ee41ccde778ad931ae413"
     },
     {
       "host": "utratadochodu.pl",
@@ -297,7 +314,8 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "zoneId": "dc55b8841a41dff54a6e9887331a0469"
     }
   ]
 }

@@ -51,11 +51,11 @@ async function resolveZoneId(env, zone) {
 /** Ile dni zostało do wygaśnięcia certyfikatu brzegowego obsługującego hosta. */
 export async function probeCertificate(target, env, budget) {
   if (!env.CF_API_TOKEN) return skip('certificate', 'Pominięte: brak CF_API_TOKEN');
-  if (!target.zone) return skip('certificate', 'Pominięte: cel nie ma ustawionego pola zone');
-  if (!budget.take(2)) return skip('certificate', 'Pominięte: wyczerpany budżet podżądań');
+  if (!target.zone && !target.zoneId) return skip('certificate', 'Pominięte: cel nie ma ani zone, ani zoneId');
+  if (!budget.take(target.zoneId ? 1 : 2)) return skip('certificate', 'Pominięte: wyczerpany budżet podżądań');
 
   try {
-    const zoneId = await resolveZoneId(env, target.zone);
+    const zoneId = target.zoneId ?? (await resolveZoneId(env, target.zone));
     if (!zoneId) {
       // Pusta odpowiedź przy udanym wywołaniu znaczy, że token jest ważny, ale
       // ta strefa nie mieści się w jego zakresie. Liczba stref, które w ogóle

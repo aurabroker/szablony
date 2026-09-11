@@ -62,3 +62,11 @@ test('sonda kanału raportów CSP jest domyślnie wyłączona', () => {
   assert.equal(normalizeTarget('a.example.com').checkCspPipeline, false);
   assert.equal(normalizeTarget({ host: 'a.example.com', checkCspPipeline: true }).checkCspPipeline, true);
 });
+
+test('identyfikator strefy przechodzi tylko w poprawnym formacie', () => {
+  const dobry = normalizeTarget({ host: 'a.example.com', zoneId: 'dc55b8841a41dff54a6e9887331a0469' });
+  assert.equal(dobry.zoneId, 'dc55b8841a41dff54a6e9887331a0469');
+  for (const zly of ['krotki', 'DC55B8841A41DFF54A6E9887331A0469', 123, null, '../../etc']) {
+    assert.equal(normalizeTarget({ host: 'a.example.com', zoneId: zly }).zoneId, null);
+  }
+});

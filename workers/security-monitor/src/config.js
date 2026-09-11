@@ -72,6 +72,9 @@ export function normalizeTarget(raw) {
   return {
     host,
     zone: typeof source.zone === 'string' ? source.zone.trim().toLowerCase() : null,
+    // Podany wprost identyfikator strefy oszczędza wyszukiwania po nazwie,
+    // a tym samym uprawnienia Zone Read na tokenie.
+    zoneId: /^[0-9a-f]{32}$/.test(String(source.zoneId ?? '')) ? source.zoneId : null,
     expect: normalizedExpect,
     probePaths: asStringArray(source.probePaths, DEFAULT_PROBE_PATHS).filter((p) => p.startsWith('/')),
     assets: asStringArray(source.assets).filter((u) => u.startsWith('https://')),
