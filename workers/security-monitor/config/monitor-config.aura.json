@@ -55,7 +55,9 @@
       "expect": {
         "csp": "any",
         "hstsMinAge": 15552000
-      }
+      },
+      "enabled": false,
+      "_uwaga": "Brak serwisu pod tym adresem. Wlaczyc ponownie po uruchomieniu strony."
     },
     {
       "host": "grupowe.pro",
