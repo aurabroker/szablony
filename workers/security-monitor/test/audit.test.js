@@ -231,3 +231,30 @@ test('strona zastepcza na wrazliwej sciezce nie jest bledem, prawdziwy plik jest
   const plik = await runAudit({ MONITOR_CONFIG: cfg, MONITOR_STATE: fakeKv() }, 'test');
   assert.equal(plik.report.targets[0].findings.find((f) => f.id === 'path:/.env').status, 'fail');
 });
+
+test('wstrzyknieta tresc jest wychwytywana w pelnym przebiegu', async () => {
+  const kv = fakeKv();
+  const cfg = JSON.stringify({ targets: [{ host: 'app.example.com', probePaths: [] }] });
+  const strona = (dodatek) => `<html><body><h1>Kancelaria</h1>${dodatek}</body></html>`;
+
+  const trasy = (dodatek) => ({
+    'GET https://app.example.com/': { body: strona(dodatek), headers: { ...HEADERS_OK, 'content-type': 'text/html' } },
+    'GET http://app.example.com/': { status: 301, headers: { location: 'https://app.example.com/' } },
+    'OPTIONS https://app.example.com/': { headers: { allow: 'GET' } },
+    'GET https://app.example.com/.well-known/security.txt': { status: 404 },
+  });
+
+  installFetch(trasy('<a href="https://facebook.com/x">fb</a>'));
+  const pierwszy = await runAudit({ MONITOR_CONFIG: cfg, MONITOR_STATE: kv }, 'test');
+  assert.match(pierwszy.report.targets[0].findings.find((f) => f.id === 'linki').title, /Zapisano wzorzec/);
+
+  installFetch(trasy('<a href="https://facebook.com/x">fb</a><a href="https://kasyno.example" style="display:none">bonus</a>'));
+  const drugi = await runAudit({ MONITOR_CONFIG: cfg, MONITOR_STATE: kv }, 'test');
+  const ustalenia = drugi.report.targets[0].findings;
+  assert.equal(ustalenia.find((f) => f.id === 'spam-ukryte').status, 'fail');
+  assert.equal(ustalenia.find((f) => f.id === 'linki').status, 'warn');
+
+  // wzorzec nie zostal nadpisany, wiec ostrzezenie wisi dalej
+  const trzeci = await runAudit({ MONITOR_CONFIG: cfg, MONITOR_STATE: kv }, 'test');
+  assert.equal(trzeci.report.targets[0].findings.find((f) => f.id === 'linki').status, 'warn');
+});

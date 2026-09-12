@@ -263,3 +263,56 @@ test('caly ruch za proxy to ok', async () => {
   const { evaluateDns } = await import('../src/checks.js');
   assert.equal(znajdz(evaluateDns(dns([{ type: 'A', name: 'a.pl' }]), 'a.pl'), 'proxy').status, 'ok');
 });
+
+test('ukryty odnosnik ze stylem jest wykrywany', async () => {
+  const { extractLinks, evaluateContentIntegrity } = await import('../src/checks.js');
+  const html = `<p>tekst</p>
+    <a href="https://kasyno.example/bonus" style="display:none">wygraj</a>
+    <a href="https://partner.example">normalny partner</a>`;
+  const inv = extractLinks(html, 'a.pl');
+  assert.equal(inv.ukryteOdnosniki, 1);
+  assert.deepEqual(inv.domeny, ['kasyno.example', 'partner.example']);
+
+  const f = evaluateContentIntegrity(inv, { domeny: [] }, 'a.pl');
+  assert.equal(f.find((x) => x.id === 'spam-ukryte').status, 'fail');
+});
+
+test('odnosnik w kontenerze wypchnietym za ekran to ostrzezenie', async () => {
+  const { extractLinks, evaluateContentIntegrity } = await import('../src/checks.js');
+  const inv = extractLinks('<div style="position:absolute;left:-9999px"><a href="https://x.example">a</a></div>', 'a.pl');
+  assert.equal(inv.ukryteKontenery, 1);
+  assert.equal(inv.ukryteOdnosniki, 0);
+  assert.equal(evaluateContentIntegrity(inv, { domeny: [] }, 'a.pl').find((x) => x.id === 'spam-ukryte').status, 'warn');
+});
+
+test('slowa obce dla kancelarii to blad, wlasna terminologia nie', async () => {
+  const { extractLinks, evaluateContentIntegrity } = await import('../src/checks.js');
+  const spam = extractLinks('<p>Tanie kamagra i kasyno online</p>', 'a.pl');
+  assert.equal(evaluateContentIntegrity(spam, { domeny: [] }, 'a.pl').find((x) => x.id === 'spam-slowa').status, 'fail');
+
+  const wlasne = extractLinks('<p>Odszkodowanie, kredyt, pożyczka, rozwód, alimenty</p>', 'a.pl');
+  assert.equal(wlasne.slowa.length, 0, 'normalna treść nie może wywoływać alarmu');
+});
+
+test('wlasne odnosniki i www nie licza sie jako zewnetrzne', async () => {
+  const { extractLinks } = await import('../src/checks.js');
+  const inv = extractLinks('<a href="/kontakt">x</a><a href="https://www.a.pl/o-nas">y</a><a href="https://a.pl/#top">z</a>', 'a.pl');
+  assert.deepEqual(inv.domeny, []);
+});
+
+test('nowa domena w odnosnikach to ostrzezenie, znana nie', async () => {
+  const { evaluateContentIntegrity } = await import('../src/checks.js');
+  const teraz = { domeny: ['facebook.com', 'obca.example'], ukryteOdnosniki: 0, ukryteKontenery: 0, slowa: [] };
+  assert.equal(evaluateContentIntegrity(teraz, { domeny: ['facebook.com'] }, 'a.pl').find((x) => x.id === 'linki').status, 'warn');
+  assert.equal(
+    evaluateContentIntegrity(teraz, { domeny: ['facebook.com', 'obca.example'] }, 'a.pl').find((x) => x.id === 'linki').status,
+    'ok',
+  );
+});
+
+test('pierwszy przebieg zapisuje wzorzec zamiast alarmowac', async () => {
+  const { evaluateContentIntegrity } = await import('../src/checks.js');
+  const f = evaluateContentIntegrity({ domeny: ['x.example'], ukryteOdnosniki: 0, ukryteKontenery: 0, slowa: [] }, null, 'a.pl');
+  assert.equal(f[0].status, 'info');
+  assert.match(f[0].title, /Zapisano wzorzec/);
+});

@@ -4,10 +4,12 @@
  */
 
 import {
+  evaluateContentIntegrity,
   evaluateCookies,
   evaluateScriptInventory,
   evaluateSecurityHeaders,
   evaluateSecurityTxt,
+  extractLinks,
   extractScripts,
   scriptHosts,
 } from './checks.js';
@@ -86,10 +88,18 @@ export async function probeHeaders(target, budget, timeoutMs, kv) {
     ...evaluateCookies(readSetCookie(response.headers), target.expect),
   ];
 
-  // Inwentarz skryptów z tej samej odpowiedzi — bez dodatkowego podżądania.
+  // Inwentarz skryptów i treści z tej samej odpowiedzi — bez dodatkowego podżądania.
   const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
   if (target.checkScripts && response.status === 200 && contentType.includes('text/html')) {
-    findings.push(...(await inventoryScripts(target, response, kv)));
+    let html = '';
+    try {
+      html = await response.text();
+    } catch (error) {
+      findings.push({ id: 'scripts', status: 'info', title: 'Nie udało się odczytać treści strony', detail: { blad: String(error?.message ?? error) } });
+      return findings;
+    }
+    findings.push(...(await inventoryScripts(target, html, kv)));
+    findings.push(...(await inventoryContent(target, html, kv)));
   }
 
   return findings;
@@ -102,14 +112,7 @@ export async function probeHeaders(target, budget, timeoutMs, kv) {
  * ostrzeżenie zniknęłoby po jednym przebiegu, a chcemy, żeby wisiało do
  * czasu, aż człowiek je obejrzy i zaakceptuje przez POST /accept.
  */
-async function inventoryScripts(target, response, kv) {
-  let html = '';
-  try {
-    html = await response.text();
-  } catch (error) {
-    return [{ id: 'scripts', status: 'info', title: 'Nie udało się odczytać treści strony', detail: { blad: String(error?.message ?? error) } }];
-  }
-
+async function inventoryScripts(target, html, kv) {
   const current = extractScripts(html, target.host);
   const key = `baseline:scripts:${target.host}`;
 
@@ -297,5 +300,30 @@ export async function probeAssetHashes(target, budget, timeoutMs, kv) {
       findings.push({ id, status: 'ok', title: `Bez zmian: ${url}`, detail: null });
     }
   }
+  return findings;
+}
+
+/**
+ * Integralność treści. Wzorca nie nadpisujemy, gdy wynik jest niepokojący —
+ * ostrzeżenie ma wisieć do czasu, aż człowiek je obejrzy i zaakceptuje.
+ */
+async function inventoryContent(target, html, kv) {
+  const current = extractLinks(html, target.host);
+  const key = `baseline:content:${target.host}`;
+
+  let baseline = null;
+  try {
+    baseline = kv ? await kv.get(key, { type: 'json' }) : null;
+  } catch {
+    baseline = null;
+  }
+
+  const findings = evaluateContentIntegrity(current, baseline, target.host);
+  const niepokojace = findings.some((f) => f.status === 'warn' || f.status === 'fail');
+
+  if (kv && !niepokojace) {
+    await kv.put(key, JSON.stringify({ domeny: current.domeny, seenAt: new Date().toISOString() }));
+  }
+
   return findings;
 }

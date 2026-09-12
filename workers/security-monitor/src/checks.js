@@ -554,3 +554,119 @@ export function evaluateDns(records, host) {
 
   return out;
 }
+
+/* ------------------------------------------------------------------ */
+/* Integralność treści: wstrzyknięty spam i ukryte odnośniki           */
+/* ------------------------------------------------------------------ */
+
+const LINK_TAG = /<a\b([^>]*)>/gi;
+const HREF_ATTR = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i;
+const STYLE_ATTR = /\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+
+/** Wzorce, którymi ukrywa się treść przed użytkownikiem, a nie przed Google. */
+const UKRYCIE = /(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0|text-indent\s*:\s*-\s*\d{3,}|left\s*:\s*-\s*\d{3,}|top\s*:\s*-\s*\d{3,}|height\s*:\s*0\s*;?\s*overflow\s*:\s*hidden)/i;
+
+/**
+ * Słowa jednoznacznie obce dla kancelarii i ubezpieczeń. Lista jest krótka
+ * celowo: „kredyt", „pożyczka" czy „odszkodowanie" są tu normalną treścią,
+ * więc ich obecność nic nie znaczy.
+ */
+export const SLOWA_SPAMOWE = [
+  'viagra', 'cialis', 'kamagra', 'sildenafil', 'tadalafil',
+  'casino online', 'kasyno online', 'free spins', 'darmowe spiny', 'bukmacher online',
+  'escort', 'replica watches', 'payday loan', 'bitcoin doubler', 'porn',
+];
+
+export function extractLinks(html, host, limitBytes = 512 * 1024) {
+  const source = String(html ?? '').slice(0, limitBytes);
+  const zewnetrzne = new Set();
+  let ukryte = 0;
+
+  LINK_TAG.lastIndex = 0;
+  let match;
+  while ((match = LINK_TAG.exec(source)) !== null) {
+    const attrs = match[1] ?? '';
+    const href = HREF_ATTR.exec(attrs);
+    const style = STYLE_ATTR.exec(attrs);
+    const schowany = style && UKRYCIE.test(style[1] ?? style[2] ?? '');
+
+    if (href) {
+      const adres = normalizeScriptUrl(href[1] ?? href[2] ?? href[3], host);
+      if (adres && adres.host !== host && adres.host !== `www.${host}`) {
+        zewnetrzne.add(adres.host);
+        if (schowany) ukryte += 1;
+      }
+    }
+  }
+
+  // Kontenery ukryte stylem, wewnątrz których siedzą odnośniki.
+  let kontenery = 0;
+  const STYL = /style\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+  STYL.lastIndex = 0;
+  while ((match = STYL.exec(source)) !== null) {
+    if (!UKRYCIE.test(match[1] ?? match[2] ?? '')) continue;
+    if (/<a\b[^>]*href/i.test(source.slice(match.index, match.index + 800))) kontenery += 1;
+  }
+
+  const tekst = source.toLowerCase();
+  const slowa = SLOWA_SPAMOWE.filter((w) => tekst.includes(w));
+
+  return { domeny: [...zewnetrzne].sort(), ukryteOdnosniki: ukryte, ukryteKontenery: kontenery, slowa };
+}
+
+/**
+ * Porównanie treści ze wzorcem. Najczęstszy atak na strony wizytówkowe to nie
+ * kradzież danych, a doklejenie ukrytych odnośników, żeby żerować na pozycji
+ * w wyszukiwarce. Właściciel zwykle dowiaduje się o tym od Google.
+ */
+export function evaluateContentIntegrity(current, baseline, host) {
+  const out = [];
+
+  if (current.slowa.length) {
+    out.push({
+      id: 'spam-slowa',
+      status: 'fail',
+      title: `Treść zawiera słowa obce dla tej strony: ${current.slowa.join(', ')}`,
+      detail: { skutek: 'typowy objaw wstrzyknięcia treści przez przejętą wtyczkę lub konto' },
+    });
+  }
+
+  const ukryte = current.ukryteOdnosniki + current.ukryteKontenery;
+  if (ukryte > 0) {
+    out.push({
+      id: 'spam-ukryte',
+      status: current.ukryteOdnosniki > 0 ? 'fail' : 'warn',
+      title: `Ukryte odnośniki na stronie: ${ukryte}`,
+      detail: {
+        odnosniki_ze_stylem: current.ukryteOdnosniki,
+        ukryte_kontenery: current.ukryteKontenery,
+        uwaga: 'odnośnik niewidoczny dla użytkownika, ale widoczny dla wyszukiwarki',
+      },
+    });
+  }
+
+  if (!baseline || !Array.isArray(baseline.domeny)) {
+    out.push({
+      id: 'linki',
+      status: 'info',
+      title: `Zapisano wzorzec: ${current.domeny.length} domen w odnośnikach`,
+      detail: { domeny: current.domeny.slice(0, 25) },
+    });
+    return out;
+  }
+
+  const znane = new Set(baseline.domeny);
+  const nowe = current.domeny.filter((d) => !znane.has(d));
+  out.push(
+    nowe.length
+      ? {
+          id: 'linki',
+          status: 'warn',
+          title: `Nowe domeny w odnośnikach: ${nowe.slice(0, 8).join(', ')}`,
+          detail: { wszystkie_nowe: nowe.slice(0, 25) },
+        }
+      : { id: 'linki', status: 'ok', title: `Bez zmian: ${current.domeny.length} domen w odnośnikach`, detail: null },
+  );
+
+  return out;
+}
