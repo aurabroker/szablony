@@ -1,5 +1,5 @@
 {
-  "_opis": "Pilotaz warstwy naglowkow. Tryb obserwacyjny: CSP nic nie blokuje.",
+  "_opis": "Host pilotazowy warstwy naglowkow. Tryb obserwacyjny: CSP nic nie blokuje.",
   "csp": {
     "enabled": true,
     "mode": "report-only",

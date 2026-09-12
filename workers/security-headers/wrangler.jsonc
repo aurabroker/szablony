@@ -15,7 +15,9 @@
   "preview_urls": false,
   "observability": { "enabled": true },
 
-  "routes": [],
+  // Pilotaz: jeden host, tryb obserwacyjny. Kolejne dopisujemy dopiero po
+  // domknieciu tego, wedlug kolejnosci z README.
+  "routes": [{ "pattern": "rozwodochota.pl/*", "zone_name": "rozwodochota.pl" }],
 
   "kv_namespaces": [
     // npx wrangler kv namespace create SECURITY_POLICIES

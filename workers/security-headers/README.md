@@ -59,6 +59,16 @@ wszystkich subdomen na każdym stopniu.
 **`report-only` dotyczy wyłącznie CSP.** COOP, CORP, `Permissions-Policy`,
 HSTS i `nosniff` działają w pełni od pierwszej sekundy.
 
+## Trasy dodaje się ręcznie
+
+Pole `routes` w `wrangler.jsonc` jest źródłem prawdy, ale przypisanie trasy
+wymaga uprawnienia **Zone → Workers Routes → Edit** na tokenie. Jeśli token
+wdrażający go nie ma, kod wgra się poprawnie, a `wrangler deploy` zakończy się
+błędem `Authentication error` na kroku tras. Trasę dodaje się wtedy w panelu:
+
+Workers & Pages → `security-headers` → Settings → **Domains & Routes** → Add →
+Route → wzorzec `HOST/*`, strefa `HOST`.
+
 ## Wdrożenie etapami
 
 ```bash
