@@ -1,0 +1,28 @@
+{
+  // UWAGA: ten Worker NIE JEST WDROZONY i nie ma zadnej trasy.
+  //
+  // Stoi na sciezce ruchu produkcyjnego, wiec jego awaria oznacza niedostepne
+  // strony. Wdrozenie idzie etapami opisanymi w README: najpierw jeden host
+  // w trybie report-only, potem kolejne.
+  //
+  // Pole routes jest celowo puste. Dopisanie hosta tutaj wprowadza Workera
+  // na jego ruch produkcyjny natychmiast po wdrozeniu.
+  "name": "security-headers",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-12",
+
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+
+  "routes": [],
+
+  "kv_namespaces": [
+    // npx wrangler kv namespace create SECURITY_POLICIES
+    { "binding": "SECURITY_POLICIES", "id": "UZUPELNIJ_ID_NAMESPACE" }
+  ]
+
+  // Analytics Engine wymaga planu Workers Paid. Bez tego bindingu endpoint
+  // raportow dziala, tylko nic nie zapisuje.
+  // "analytics_engine_datasets": [{ "binding": "CSP_REPORTS", "dataset": "csp_reports" }]
+}

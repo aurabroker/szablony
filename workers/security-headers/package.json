@@ -1,0 +1,11 @@
+{
+  "name": "security-headers",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker: centralna warstwa naglowkow bezpieczenstwa z CSP i nonce per zadanie",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "npx wrangler deploy --dry-run"
+  }
+}
