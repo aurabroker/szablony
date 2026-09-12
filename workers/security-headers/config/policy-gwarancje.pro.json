@@ -1,0 +1,15 @@
+{
+  "_opis": "Pilotaz warstwy naglowkow. Tryb obserwacyjny: CSP nic nie blokuje.",
+  "csp": {
+    "enabled": true,
+    "mode": "report-only",
+    "nonce": "auto"
+  },
+  "hsts": {
+    "maxAge": 300,
+    "includeSubDomains": false,
+    "preload": false
+  },
+  "corpDocument": "same-origin",
+  "corpAsset": "cross-origin"
+}

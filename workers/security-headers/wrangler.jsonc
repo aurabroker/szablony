@@ -19,7 +19,7 @@
 
   "kv_namespaces": [
     // npx wrangler kv namespace create SECURITY_POLICIES
-    { "binding": "SECURITY_POLICIES", "id": "UZUPELNIJ_ID_NAMESPACE" }
+    { "binding": "SECURITY_POLICIES", "id": "c155dcc51c69468094a0ed520dddb05f" }
   ]
 
   // Analytics Engine wymaga planu Workers Paid. Bez tego bindingu endpoint
