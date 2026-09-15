@@ -316,3 +316,49 @@ test('pierwszy przebieg zapisuje wzorzec zamiast alarmowac', async () => {
   assert.equal(f[0].status, 'info');
   assert.match(f[0].title, /Zapisano wzorzec/);
 });
+
+test('slowo spamowe nie moze trafiac na fragment innego slowa', async () => {
+  const { znajdzSlowa } = await import('../src/checks.js');
+  // To byl realny falszywy alarm: "specialist" zawiera "cialis",
+  // a zminifikowany skrypt z ciagiem "a1porn9x" zawiera "porn".
+  assert.deepEqual(znajdzSlowa('Jesteśmy specialist od rozwodów'), []);
+  assert.deepEqual(znajdzSlowa('socialism i commercialisation'), []);
+  assert.deepEqual(znajdzSlowa('wspornik i poranny spacer'), []);
+  assert.deepEqual(znajdzSlowa('escortowy transport'), []);
+
+  const trafienie = znajdzSlowa('Tanie Cialis bez recepty');
+  assert.equal(trafienie.length, 1);
+  assert.equal(trafienie[0].slowo, 'cialis');
+  assert.match(trafienie[0].kontekst, /Tanie Cialis bez recepty/);
+});
+
+test('skanujemy widoczny tekst, nie skrypty i style', async () => {
+  const { widocznyTekst, extractLinks } = await import('../src/checks.js');
+  const html = `<html><head><style>.porn-grid{color:red}</style>
+    <script>var token="x9cialis2z"; // porn</script></head>
+    <body><!-- porn w komentarzu --><p>Kancelaria rozwodowa</p>
+    <img alt="porn" src="/a.png"></body></html>`;
+
+  assert.equal(widocznyTekst(html), 'Kancelaria rozwodowa');
+  assert.deepEqual(extractLinks(html, 'a.pl').slowa, [], 'nic z kodu ani atrybutow nie moze alarmowac');
+});
+
+test('spam widoczny w tresci nadal jest wykrywany', async () => {
+  const { extractLinks, evaluateContentIntegrity } = await import('../src/checks.js');
+  const inv = extractLinks('<body><p>Kup kamagra i viagra tanio</p></body>', 'a.pl');
+  assert.equal(inv.slowa.length, 2);
+  const f = evaluateContentIntegrity(inv, { domeny: [] }, 'a.pl').find((x) => x.id === 'spam-slowa');
+  assert.equal(f.status, 'fail');
+  assert.ok(f.detail.konteksty.length > 0, 'raport ma pokazac kontekst do weryfikacji');
+});
+
+test('ukryty odnosnik wewnetrzny to nie spam, zewnetrzny tak', async () => {
+  const { extractLinks } = await import('../src/checks.js');
+  // Odnosnik pomijania nawigacji i tekst dla czytnikow ekranu ukrywa sie
+  // dokladnie tak samo jak spam, ale prowadzi do wlasnej strony.
+  const dostepnosc = extractLinks('<div style="position:absolute;left:-9999px"><a href="#main">Przejdź do treści</a></div>', 'a.pl');
+  assert.equal(dostepnosc.ukryteKontenery, 0);
+
+  const spam = extractLinks('<div style="position:absolute;left:-9999px"><a href="https://kasyno.example">bonus</a></div>', 'a.pl');
+  assert.equal(spam.ukryteKontenery, 1);
+});

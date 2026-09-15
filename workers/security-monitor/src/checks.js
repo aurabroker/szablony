@@ -577,6 +577,54 @@ export const SLOWA_SPAMOWE = [
   'escort', 'replica watches', 'payday loan', 'bitcoin doubler', 'porn',
 ];
 
+/**
+ * Widoczny tekst strony: bez skryptów, stylów i komentarzy, bez znaczników
+ * i bez wartości atrybutów. Skanowanie surowego HTML dawało fałszywe trafienia
+ * na zminifikowanym kodzie i nazwach klas.
+ */
+export function widocznyTekst(html, limitBytes = 512 * 1024) {
+  return String(html ?? '')
+    .slice(0, limitBytes)
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&[a-z]+;|&#\d+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const escapeRe = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Dopasowanie po całych słowach, nie po fragmentach. Bez granicy słowa
+ * „specialist" trafiało na „cialis", a „wspornik" na „porn".
+ */
+export function znajdzSlowa(tekst, slowa = SLOWA_SPAMOWE) {
+  const trafienia = [];
+  for (const slowo of slowa) {
+    const re = new RegExp(`\\b${escapeRe(slowo)}\\b`, 'i');
+    const m = re.exec(tekst);
+    if (!m) continue;
+    trafienia.push({
+      slowo,
+      kontekst: tekst.slice(Math.max(0, m.index - 50), m.index + slowo.length + 50).trim(),
+    });
+  }
+  return trafienia;
+}
+
+function zewnetrznyLinkW(fragment, host) {
+  const RE = /<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
+  RE.lastIndex = 0;
+  let m;
+  while ((m = RE.exec(fragment)) !== null) {
+    const adres = normalizeScriptUrl(m[1] ?? m[2] ?? m[3], host);
+    if (adres && adres.host !== host && adres.host !== `www.${host}`) return true;
+  }
+  return false;
+}
+
 export function extractLinks(html, host, limitBytes = 512 * 1024) {
   const source = String(html ?? '').slice(0, limitBytes);
   const zewnetrzne = new Set();
@@ -599,19 +647,23 @@ export function extractLinks(html, host, limitBytes = 512 * 1024) {
     }
   }
 
-  // Kontenery ukryte stylem, wewnątrz których siedzą odnośniki.
+  // Kontener ukryty stylem liczy się tylko wtedy, gdy prowadzi na zewnątrz.
+  // Odnośniki pomijania nawigacji i teksty dla czytników ekranu są ukrywane
+  // dokładnie tak samo, a są normalną i pożądaną praktyką.
   let kontenery = 0;
   const STYL = /style\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
   STYL.lastIndex = 0;
   while ((match = STYL.exec(source)) !== null) {
     if (!UKRYCIE.test(match[1] ?? match[2] ?? '')) continue;
-    if (/<a\b[^>]*href/i.test(source.slice(match.index, match.index + 800))) kontenery += 1;
+    if (zewnetrznyLinkW(source.slice(match.index, match.index + 800), host)) kontenery += 1;
   }
 
-  const tekst = source.toLowerCase();
-  const slowa = SLOWA_SPAMOWE.filter((w) => tekst.includes(w));
-
-  return { domeny: [...zewnetrzne].sort(), ukryteOdnosniki: ukryte, ukryteKontenery: kontenery, slowa };
+  return {
+    domeny: [...zewnetrzne].sort(),
+    ukryteOdnosniki: ukryte,
+    ukryteKontenery: kontenery,
+    slowa: znajdzSlowa(widocznyTekst(source)),
+  };
 }
 
 /**
@@ -623,11 +675,15 @@ export function evaluateContentIntegrity(current, baseline, host) {
   const out = [];
 
   if (current.slowa.length) {
+    const nazwy = current.slowa.map((s) => (typeof s === 'string' ? s : s.slowo));
     out.push({
       id: 'spam-slowa',
       status: 'fail',
-      title: `Treść zawiera słowa obce dla tej strony: ${current.slowa.join(', ')}`,
-      detail: { skutek: 'typowy objaw wstrzyknięcia treści przez przejętą wtyczkę lub konto' },
+      title: `Widoczna treść zawiera słowa obce dla tej strony: ${nazwy.join(', ')}`,
+      detail: {
+        skutek: 'typowy objaw wstrzyknięcia treści przez przejętą wtyczkę lub konto',
+        konteksty: current.slowa.filter((s) => typeof s !== 'string').map((s) => s.kontekst).slice(0, 5),
+      },
     });
   }
 
